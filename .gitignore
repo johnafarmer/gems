@@ -1,0 +1,41 @@
+# Environment
+.env
+.env.*
+*.env
+
+# Dependencies
+node_modules/
+vendor/
+
+# Build
+dist/
+build/
+*.out
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Cache
+.cache/
+.next/
+.nuxt/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Temp
+tmp/
+temp/
+*.tmp
+
+# Keys
+*.pem
+*.key
