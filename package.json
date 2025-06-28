@@ -1,0 +1,63 @@
+{
+  "name": "gems-cli",
+  "version": "0.1.0",
+  "description": "Generative Element Management System - AI-powered WordPress component generator",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "gems": "./dist/cli.js"
+  },
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "build": "bun build src/index.ts --outdir=dist --target=node",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src --ext .ts,.tsx",
+    "format": "prettier --write \"src/**/*.{ts,tsx,js,json,md}\"",
+    "typecheck": "tsc --noEmit",
+    "preview": "bun run src/preview/server.ts"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "prompts": "^2.4.2",
+    "@builder.io/mitosis-cli": "^0.4.0",
+    "openai": "^4.65.0",
+    "chalk": "^5.3.0",
+    "ora": "^8.0.1",
+    "better-sqlite3": "^11.3.0",
+    "sharp": "^0.33.5",
+    "vite": "^5.4.0",
+    "open": "^10.1.0",
+    "figlet": "^1.7.0",
+    "gradient-string": "^2.0.2"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.5.0",
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/figlet": "^1.5.8",
+    "@typescript-eslint/eslint-plugin": "^8.6.0",
+    "@typescript-eslint/parser": "^8.6.0",
+    "eslint": "^9.10.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0",
+    "@vitest/coverage-v8": "^2.1.0",
+    "playwright": "^1.47.0"
+  },
+  "keywords": [
+    "cli",
+    "wordpress",
+    "components",
+    "ai",
+    "generator",
+    "web-components",
+    "bun"
+  ],
+  "author": "John",
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}

@@ -1,41 +1,63 @@
-# Environment
-.env
-.env.*
-*.env
-
 # Dependencies
 node_modules/
-vendor/
+.pnp
+.pnp.js
 
-# Build
+# Build output
 dist/
 build/
-*.out
+out/
+*.tsbuildinfo
 
-# IDE
-.vscode/
+# Testing
+coverage/
+.nyc_output
+test-results/
+playwright-report/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
 .idea/
+*.swp
+*.swo
+*~
+
+# OS files
 .DS_Store
+Thumbs.db
 
 # Logs
-*.log
 logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+bun-error.log*
 
-# Cache
+# Database
+*.sqlite
+*.sqlite3
+*.db
+
+# AI Model Cache
 .cache/
-.next/
-.nuxt/
+model-cache/
 
-# Python
-__pycache__/
-*.pyc
-venv/
+# Generated components
+generated/
+output/
 
-# Temp
+# Temporary files
 tmp/
 temp/
-*.tmp
+.tmp/
 
-# Keys
-*.pem
-*.key
+# Bun
+bun.lockb
