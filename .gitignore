@@ -61,3 +61,8 @@ temp/
 
 # Bun
 bun.lockb
+
+# User-specific styles (except template)
+styles/*
+!styles/STYLE_TEMPLATE.md
+!styles/.gitkeep
