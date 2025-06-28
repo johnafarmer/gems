@@ -28,11 +28,20 @@ export class PreviewServer {
           const filePath = join(process.cwd(), pathname.slice(1));
           if (existsSync(filePath)) {
             const ext = extname(filePath);
-            const contentType = ext === '.js' ? 'application/javascript' : 
-                               ext === '.html' ? 'text/html' : 
-                               'text/plain';
-            res.writeHead(200, { 'Content-Type': contentType });
-            res.end(readFileSync(filePath));
+            
+            // For HTML files in preview mode, serve a cleaned version
+            if (ext === '.html' && req.headers.referer) {
+              const htmlContent = readFileSync(filePath, 'utf-8');
+              const cleanedHtml = this.cleanHtmlForPreview(htmlContent);
+              res.writeHead(200, { 'Content-Type': 'text/html' });
+              res.end(cleanedHtml);
+            } else {
+              const contentType = ext === '.js' ? 'application/javascript' : 
+                                 ext === '.html' ? 'text/html' : 
+                                 'text/plain';
+              res.writeHead(200, { 'Content-Type': contentType });
+              res.end(readFileSync(filePath));
+            }
           } else {
             res.writeHead(404);
             res.end('Not found');
@@ -412,5 +421,60 @@ export class PreviewServer {
 </body>
 </html>
     `.trim();
+  }
+  
+  private cleanHtmlForPreview(html: string): string {
+    // Extract the custom element name from the stored elementName variable
+    const elementNameMatch = html.match(/const elementName = ["']([^"']+)["']/);
+    const elementName = elementNameMatch ? elementNameMatch[1] : null;
+    
+    // Find the component tag - look for custom element pattern
+    let componentTag = '';
+    if (elementName) {
+      const componentRegex = new RegExp(`<${elementName}[^>]*>(?:.*?)<\/${elementName}>`, 's');
+      const match = html.match(componentRegex);
+      componentTag = match ? match[0] : `<${elementName}></${elementName}>`;
+    } else {
+      // Fallback: try to find any custom element
+      const customElementMatch = html.match(/<([a-z]+-[a-z-]+)(?:[^>]*)>(?:.*?)<\/\1>/);
+      componentTag = customElementMatch ? customElementMatch[0] : '';
+    }
+    
+    // Extract the JS file path
+    const scriptMatch = html.match(/<script src="([^"]+\.js)"><\/script>/);
+    const scriptSrc = scriptMatch ? scriptMatch[1] : '';
+    
+    // Create a minimal preview HTML
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Component Preview</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #ffffff;
+    }
+    
+    /* Ensure component is visible and centered */
+    body > * {
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+  </style>
+</head>
+<body>
+  ${scriptSrc ? `<script src="${scriptSrc}"></script>` : ''}
+  ${componentTag || '<p>Component could not be loaded</p>'}
+</body>
+</html>`;
   }
 }

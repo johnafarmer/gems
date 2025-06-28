@@ -52,8 +52,9 @@ export class TerminalEffects {
       
       // Status line with spinner
       const spinner = this.frames[frameIndex % this.frames.length];
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      const statusLine = `${chalk.cyan(spinner)} Generating ${chalk.yellow(componentType)} component... ${chalk.dim(`[${elapsed}s]`)}`;
+      const elapsedMs = Date.now() - startTime;
+      const elapsedSec = (elapsedMs / 1000).toFixed(1);
+      const statusLine = `${chalk.cyan(spinner)} Generating ${chalk.yellow(componentType)} component... ${chalk.dim(`[${elapsedSec}s]`)}`;
       console.log('\n' + this.centerText(statusLine));
       
       // Description with word wrap
@@ -64,8 +65,7 @@ export class TerminalEffects {
       
       // Progress bar - slowly fill instead of loop
       const totalDuration = 60000; // 60 seconds expected max
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / totalDuration, 0.95); // Cap at 95% until done
+      const progress = Math.min(elapsedMs / totalDuration, 0.95); // Cap at 95% until done
       const barWidth = 40;
       const filled = Math.floor(progress * barWidth);
       const progressBar = chalk.cyan('█'.repeat(filled)) + chalk.gray('░'.repeat(barWidth - filled));
@@ -86,7 +86,7 @@ export class TerminalEffects {
       ];
       
       // Progress through messages based on elapsed time
-      const messageProgress = Math.min(elapsed / 30000, 1); // 30 seconds to go through all messages
+      const messageProgress = Math.min(elapsedMs / 30000, 1); // 30 seconds to go through all messages
       const messageIndex = Math.min(Math.floor(messageProgress * aiMessages.length), aiMessages.length - 1);
       console.log('\n' + this.centerText(chalk.magenta(aiMessages[messageIndex])));
       
