@@ -18,8 +18,7 @@ export class TerminalEffects {
     }).join('\n');
   }
   
-  static async showGeneratingAnimation(componentType: string, description: string) {
-    const width = process.stdout.columns;
+  static async showGeneratingAnimation(componentType: string, description: string, source?: any) {
     const height = process.stdout.rows;
     
     // Clear screen and hide cursor
@@ -49,6 +48,24 @@ export class TerminalEffects {
       // Apply rainbow gradient with animation
       const animatedLogo = this.rainbowGradient.multiline(gemsLogo);
       console.log(this.centerText(animatedLogo));
+      
+      // Display source info if available
+      if (source) {
+        let sourceText = '';
+        if (source.type === 'local') {
+          sourceText = chalk.cyan('🖥️  Local LM Studio');
+        } else if (source.type === 'network') {
+          sourceText = chalk.magenta('🌐 Network: ') + chalk.dim(source.endpoint || 'Watson');
+        } else if (source.type === 'cloud') {
+          sourceText = chalk.yellow('☁️  OpenRouter: ') + chalk.dim(source.model?.split('/').pop() || 'Cloud Model');
+        } else if (source.type === 'template') {
+          sourceText = chalk.gray('📝 Template Mode');
+        }
+        
+        if (sourceText) {
+          console.log('\n' + this.centerText(sourceText));
+        }
+      }
       
       // Status line with spinner
       const spinner = this.frames[frameIndex % this.frames.length];
@@ -100,8 +117,7 @@ export class TerminalEffects {
     };
   }
   
-  static showSuccess(component: any) {
-    const width = process.stdout.columns;
+  static showSuccess(component: any, source?: any) {
     const height = process.stdout.rows;
     
     // Clear screen
@@ -145,6 +161,25 @@ export class TerminalEffects {
     // Location
     const location = component.files[0]?.path ? component.files[0].path.split('/').slice(0, -1).join('/') : '';
     console.log('\n' + this.centerText(chalk.dim(`📍 ${location}`)));
+    
+    // Source info
+    if (source) {
+      let sourceText = '';
+      if (source.type === 'local') {
+        sourceText = chalk.cyan('Generated with Local LM Studio');
+      } else if (source.type === 'network') {
+        const endpoint = source.endpoint?.split('//')[1]?.split(':')[0] || 'Network';
+        sourceText = chalk.magenta(`Generated with ${endpoint} (${source.model?.split('/').pop() || 'Network Model'})`);
+      } else if (source.type === 'cloud') {
+        sourceText = chalk.yellow(`Generated with OpenRouter (${source.model?.split('/').pop() || 'Cloud Model'})`);
+      } else if (source.type === 'template') {
+        sourceText = chalk.gray('Generated from Template');
+      }
+      
+      if (sourceText) {
+        console.log('\n' + this.centerText(sourceText));
+      }
+    }
     
     // Next steps with rainbow effect
     console.log('\n' + this.centerText(this.rainbowGradient('✨ Component generated successfully! ✨')));

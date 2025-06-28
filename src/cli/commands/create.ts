@@ -1,8 +1,8 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import ora from 'ora';
 import prompts from 'prompts';
 import { join } from 'path';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import { ComponentGenerator } from '../../generators/ComponentGenerator.js';
 import { AIService } from '../../services/ai/AIService.js';
 import { ConfigManager } from '../../config/ConfigManager.js';
@@ -65,7 +65,7 @@ Note: Put your description in quotes to ensure it's captured correctly.`)
           type: 'text',
           name: 'description',
           message: 'Describe the component you want to create:',
-          validate: value => value.length > 0 || 'Please provide a description'
+          validate: (value: string) => value.length > 0 || 'Please provide a description'
         });
         
         componentDescription = response.description;
@@ -76,15 +76,44 @@ Note: Put your description in quotes to ensure it's captured correctly.`)
         }
       }
       
-      // Get brand if not provided
+      // Get brand/style if not provided
       if (!options.brand) {
-        const response = await prompts({
-          type: 'text',
-          name: 'brand',
-          message: 'Brand/company name (optional):',
-        });
+        // Check available styles
+        const stylesDir = join(process.cwd(), 'styles');
+        let styleChoices: Array<{ title: string; value: string | null }> = [];
         
-        options.brand = response.brand;
+        if (existsSync(stylesDir)) {
+          const files = readdirSync(stylesDir)
+            .filter(f => f.endsWith('.md') && f !== 'STYLE_TEMPLATE.md' && f !== '.gitkeep');
+          
+          if (files.length > 0) {
+            styleChoices = files.map(f => ({
+              title: f.replace('.md', '').replace(/-/g, ' '),
+              value: f
+            }));
+            
+            styleChoices.push({
+              title: 'No brand style (generic)',
+              value: null
+            });
+          }
+        }
+        
+        if (styleChoices.length > 0) {
+          const response = await prompts({
+            type: 'select',
+            name: 'styleFile',
+            message: 'Select brand style:',
+            choices: styleChoices
+          });
+          
+          if (response.styleFile) {
+            // Read the style file content
+            const styleContent = readFileSync(join(stylesDir, response.styleFile), 'utf-8');
+            options.brand = response.styleFile.replace('.md', '');
+            (options as any).styleContent = styleContent;
+          }
+        }
       }
       
       // Initialize services
@@ -93,12 +122,12 @@ Note: Put your description in quotes to ensure it's captured correctly.`)
       const generator = new ComponentGenerator(aiService);
       
       const modelType = options.model || config.get('ai.defaultModel');
-      const isLocal = modelType === 'local';
       
-      // Use terminal effects for generation
+      // Use terminal effects for generation with source info
       const stopAnimation = await TerminalEffects.showGeneratingAnimation(
         componentType, 
-        componentDescription || ''
+        componentDescription || '',
+        { type: modelType === 'local' ? 'local' : 'cloud' } as any
       );
       
       // Generate component
@@ -107,15 +136,19 @@ Note: Put your description in quotes to ensure it's captured correctly.`)
         description: componentDescription,
         brand: options.brand,
         style: options.style,
+        styleContent: (options as any).styleContent,
         outputFormat: options.output,
         variations: parseInt(options.variations),
         model: options.model,
         screenshot: options.fromScreenshot
       });
       
+      // Get the actual source used
+      const actualSource = (generator as any).lastSource;
+      
       // Stop animation and show success
       stopAnimation();
-      TerminalEffects.showSuccess(component);
+      TerminalEffects.showSuccess(component, actualSource);
       
       if (options.save) {
         // Save to component library
@@ -124,17 +157,37 @@ Note: Put your description in quotes to ensure it's captured correctly.`)
       
       // Auto-preview if enabled
       if (options.preview !== false && component.files.length > 0) {
-        
         // Find the HTML file
         const htmlFile = component.files.find(f => f.path.endsWith('.html'));
         if (htmlFile) {
-          const { exec } = await import('child_process');
-          exec(`open "${htmlFile.path}"`, (error) => {
-            if (error) {
-              console.log(chalk.yellow('Could not auto-open preview. You can manually open:'));
-              console.log(chalk.gray(`   ${htmlFile.path}`));
-            }
-          });
+          // Start the preview server instead of opening the file directly
+          const PreviewServer = (await import('../../preview/PreviewServer.js')).PreviewServer;
+          const server = new PreviewServer();
+          
+          try {
+            const fileName = htmlFile.path.split('/').pop() || '';
+            const url = await server.start({
+              port: 3000,
+              component: fileName
+            });
+            
+            console.log(chalk.cyan(`\n🌐 Preview server running at: ${chalk.white(url)}`));
+            console.log(chalk.gray('Press Ctrl+C to stop the server\n'));
+            
+            // Open browser
+            const open = (await import('open')).default;
+            await open(url);
+            
+            // Keep process running
+            process.on('SIGINT', () => {
+              console.log(chalk.yellow('\n\nShutting down preview server...'));
+              server.stop();
+              process.exit(0);
+            });
+          } catch (error) {
+            console.log(chalk.yellow('Could not start preview server. You can manually run:'));
+            console.log(chalk.gray(`   gems preview --component ${htmlFile.path.split('/').pop()}`));
+          }
         }
       }
       
@@ -142,7 +195,7 @@ Note: Put your description in quotes to ensure it's captured correctly.`)
       // Clear any animation if running
       process.stdout.write('\x1B[?25h'); // Show cursor
       console.error(chalk.red('\n❌ Failed to generate component'));
-      console.error(chalk.red(error.message));
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
       process.exit(1);
     }
   });

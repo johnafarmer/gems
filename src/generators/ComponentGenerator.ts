@@ -13,6 +13,7 @@ export interface GenerateComponentOptions {
   description?: string;
   brand?: string;
   style?: string;
+  styleContent?: string;
   outputFormat?: string;
   variations?: number;
   model?: string;
@@ -46,10 +47,13 @@ export class ComponentGenerator {
 
   async generate(options: GenerateComponentOptions): Promise<GeneratedComponent> {
     const prompt = this.buildPrompt(options);
-    const response = await this.aiService.generate({ prompt, model: options.model as any });
+    const result = await this.aiService.generateWithSource({ prompt, model: options.model as any });
     
     // Parse the response and extract component code
-    const componentCode = this.parseComponentCode(response);
+    const componentCode = this.parseComponentCode(result.content);
+    
+    // Store the source info for later use
+    (this as any).lastSource = result.source;
     
     // Ensure output directory exists in current working directory
     const outputDir = join(process.cwd(), 'generated');
@@ -91,6 +95,16 @@ export class ComponentGenerator {
     // If we have a custom description, use it as the primary driver
     if (options.description) {
       let prompt = `Generate a web component based on this exact description: "${options.description}".\n\n`;
+      
+      // Include brand style guidelines if available
+      if (options.styleContent) {
+        prompt += 'Brand Style Guidelines:\n';
+        prompt += '```\n';
+        prompt += options.styleContent;
+        prompt += '\n```\n\n';
+        prompt += 'Use the color palette, typography, and design principles from these brand guidelines.\n\n';
+      }
+      
       prompt += 'Requirements:\n';
       prompt += '- Use Shadow DOM for encapsulation\n';
       prompt += '- Make it a proper Web Component with customElements.define()\n';

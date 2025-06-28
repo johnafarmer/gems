@@ -1,6 +1,7 @@
 import { homedir } from 'os';
 import { join } from 'path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { config as dotenvConfig } from 'dotenv';
 
 interface Config {
   ai: {
@@ -53,6 +54,10 @@ export class ConfigManager {
   };
 
   constructor() {
+    // Load environment variables
+    dotenvConfig({ path: '.env' });
+    dotenvConfig({ path: '.env.local' });
+    
     const configDir = join(homedir(), '.gems');
     this.configPath = join(configDir, 'config.json');
     
@@ -60,6 +65,9 @@ export class ConfigManager {
     if (!existsSync(configDir)) {
       mkdirSync(configDir, { recursive: true });
     }
+    
+    // Initialize with default config
+    this.config = this.defaultConfig;
     
     // Load config
     this.load();
@@ -77,6 +85,20 @@ export class ConfigManager {
     } else {
       this.config = this.defaultConfig;
       this.save();
+    }
+    
+    // Override with environment variables
+    if (process.env.OPENROUTER_API_KEY) {
+      this.config.ai.openrouter.key = process.env.OPENROUTER_API_KEY;
+    }
+    
+    if (process.env.LM_STUDIO_ENDPOINT) {
+      this.config.ai.local.endpoint = process.env.LM_STUDIO_ENDPOINT;
+    }
+    
+    if (process.env.LM_STUDIO_NETWORK_ENDPOINT) {
+      // Add network endpoint as a fallback option
+      this.config.ai.local.endpoint = process.env.LM_STUDIO_NETWORK_ENDPOINT;
     }
   }
 

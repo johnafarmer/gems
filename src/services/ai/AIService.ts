@@ -8,6 +8,15 @@ export interface GenerateOptions {
   maxTokens?: number;
 }
 
+export interface GenerateResult {
+  content: string;
+  source: {
+    type: 'local' | 'network' | 'cloud' | 'template';
+    endpoint?: string;
+    model?: string;
+  };
+}
+
 export class AIService {
   private config: ConfigManager;
   private openai?: OpenAI;
@@ -28,6 +37,11 @@ export class AIService {
   }
 
   async generate(options: GenerateOptions): Promise<string> {
+    const result = await this.generateWithSource(options);
+    return result.content;
+  }
+
+  async generateWithSource(options: GenerateOptions): Promise<GenerateResult> {
     const model = options.model || this.config.get('ai.defaultModel');
     
     if (model === 'local') {
@@ -37,8 +51,9 @@ export class AIService {
     }
   }
 
-  private async generateLocal(options: GenerateOptions): Promise<string> {
+  private async generateLocal(options: GenerateOptions): Promise<GenerateResult> {
     const endpoint = this.config.get('ai.local.endpoint');
+    const localModel = this.config.get('ai.local.model') || 'mistralai/devstral-small-2505';
     
     try {
       const controller = new AbortController();
@@ -50,7 +65,7 @@ export class AIService {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: this.config.get('ai.local.model') || 'mistralai/devstral-small-2505',
+          model: localModel,
           messages: [
             {
               role: 'system',
@@ -73,25 +88,38 @@ export class AIService {
         throw new Error(`Local AI request failed: ${response.statusText}`);
       }
 
-      const data = await response.json();
-      return data.choices[0].message.content;
+      const data = await response.json() as any;
+      
+      // Determine if it's local or network based on endpoint
+      const isNetwork = !endpoint.includes('localhost') && !endpoint.includes('127.0.0.1');
+      
+      return {
+        content: data.choices[0].message.content,
+        source: {
+          type: isNetwork ? 'network' : 'local',
+          endpoint: endpoint,
+          model: localModel
+        }
+      };
       
     } catch (error) {
-      console.warn('Local AI generation failed, falling back to cloud:', error.message);
+      console.warn('Local AI generation failed, falling back to cloud:', error instanceof Error ? error.message : String(error));
       return this.generateCloud(options);
     }
   }
 
-  private async generateCloud(options: GenerateOptions): Promise<string> {
+  private async generateCloud(options: GenerateOptions): Promise<GenerateResult> {
     if (!this.openai) {
       // Fallback to template-based generation when no AI is available
       console.warn('No AI service configured. Using template-based generation.');
       return this.generateFromTemplate(options);
     }
 
+    const cloudModel = this.config.get('ai.openrouter.model') || 'meta-llama/llama-3.2-3b-instruct:free';
+
     try {
       const completion = await this.openai.chat.completions.create({
-        model: this.config.get('ai.openrouter.model') || 'meta-llama/llama-3.2-3b-instruct:free',
+        model: cloudModel,
         messages: [
           {
             role: 'system',
@@ -106,20 +134,27 @@ export class AIService {
         max_tokens: options.maxTokens || 4000
       });
 
-      return completion.choices[0].message.content || '';
+      return {
+        content: completion.choices[0].message.content || '',
+        source: {
+          type: 'cloud',
+          endpoint: 'OpenRouter',
+          model: cloudModel
+        }
+      };
     } catch (error) {
-      console.warn('Cloud AI generation failed:', error.message);
+      console.warn('Cloud AI generation failed:', error instanceof Error ? error.message : String(error));
       return this.generateFromTemplate(options);
     }
   }
   
-  private generateFromTemplate(options: GenerateOptions): string {
+  private generateFromTemplate(options: GenerateOptions): GenerateResult {
     // Extract component type from prompt
     const typeMatch = options.prompt.match(/generate a (\w+)/i);
     const componentType = typeMatch ? typeMatch[1] : 'component';
     
     // Basic template-based response
-    return `\`\`\`javascript
+    const content = `\`\`\`javascript
 class ${this.toPascalCase(componentType)}Element extends HTMLElement {
   constructor() {
     super();
@@ -179,6 +214,14 @@ class ${this.toPascalCase(componentType)}Element extends HTMLElement {
 
 customElements.define('${componentType}-element', ${this.toPascalCase(componentType)}Element);
 \`\`\``;
+    
+    return {
+      content,
+      source: {
+        type: 'template',
+        model: 'Built-in Template'
+      }
+    };
   }
   
   private toPascalCase(str: string): string {

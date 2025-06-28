@@ -8,6 +8,7 @@ import { createCommand } from './cli/commands/create.js';
 import { previewCommand } from './cli/commands/preview.js';
 import { configCommand } from './cli/commands/config.js';
 import { listCommand } from './cli/commands/list.js';
+import { aiCommand } from './cli/commands/ai.js';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -39,6 +40,7 @@ program
   .name('gems')
   .description('AI-powered WordPress component generator')
   .version(version)
+  .option('-i, --interactive', 'enter interactive mode')
   .option('-v, --verbose', 'verbose output')
   .option('--no-color', 'disable colored output');
 
@@ -47,6 +49,7 @@ program.addCommand(createCommand);
 program.addCommand(previewCommand);
 program.addCommand(configCommand);
 program.addCommand(listCommand);
+program.addCommand(aiCommand);
 
 // Handle unknown commands
 program.on('command:*', () => {
@@ -55,10 +58,19 @@ program.on('command:*', () => {
   process.exit(1);
 });
 
-// Parse command line arguments
-program.parse();
+// Check if we should enter interactive mode
+const args = process.argv.slice(2);
+const isInteractive = args.length === 0 || (args.length === 1 && (args[0] === '-i' || args[0] === '--interactive'));
 
-// Show help if no command provided
-if (!process.argv.slice(2).length) {
-  program.outputHelp();
+if (isInteractive) {
+  // Enter interactive mode
+  import('./cli/interactive.js').then(({ interactiveMode }) => {
+    interactiveMode().catch(error => {
+      console.error(chalk.red('Error in interactive mode:'), error);
+      process.exit(1);
+    });
+  });
+} else {
+  // Parse command line arguments normally
+  program.parse();
 }

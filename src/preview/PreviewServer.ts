@@ -1,7 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { join, extname } from 'path';
 import { readFileSync, existsSync, readdirSync, statSync, unlinkSync, renameSync } from 'fs';
-import { createElementorComponent } from '../utils/componentMinifier.js';
 
 export interface PreviewServerOptions {
   port?: number;
@@ -42,7 +41,7 @@ export class PreviewServer {
               res.end(JSON.stringify({ success: true }));
             } catch (error) {
               res.writeHead(500, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: error.message }));
+              res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
             }
           });
         } else if (pathname === '/api/delete' && req.method === 'POST') {
@@ -62,7 +61,7 @@ export class PreviewServer {
               res.end(JSON.stringify({ success: true }));
             } catch (error) {
               res.writeHead(500, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: error.message }));
+              res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
             }
           });
         } else if (pathname === '/api/component-code' && req.method === 'GET') {
@@ -811,15 +810,19 @@ export class PreviewServer {
     });
     
     // Set up event delegation for file list clicks
-    document.addEventListener('DOMContentLoaded', () => {
-      const fileList = document.querySelector('.file-list');
-      
+    // Do this immediately, not in DOMContentLoaded
+    const fileList = document.querySelector('.file-list');
+    if (fileList) {
       fileList.addEventListener('click', (e) => {
+        e.preventDefault();
+        
         // Handle file content clicks
         const fileContent = e.target.closest('.file-content');
         if (fileContent) {
           const path = fileContent.dataset.path;
-          if (path) loadComponent(path);
+          if (path) {
+            loadComponent(path);
+          }
           return;
         }
         
@@ -837,7 +840,7 @@ export class PreviewServer {
           }
         }
       });
-    });
+    }
   </script>
 </body>
 </html>
@@ -852,8 +855,16 @@ export class PreviewServer {
     // Remove the GEMS header
     html = html.replace(/<header class="gems-header">[\s\S]*?<\/header>/g, '');
     
-    // Remove the GEMS toolbar
-    html = html.replace(/<div class="gems-toolbar">[\s\S]*?<\/div>\s*<script>[\s\S]*?<\/script>/g, '');
+    // Remove the GEMS toolbar and ALL scripts that follow it (including copy functions)
+    const toolbarIndex = html.indexOf('<div class="gems-toolbar">');
+    if (toolbarIndex !== -1) {
+      // Find the closing body tag
+      const bodyCloseIndex = html.indexOf('</body>', toolbarIndex);
+      if (bodyCloseIndex !== -1) {
+        // Remove everything from toolbar to just before </body>
+        html = html.substring(0, toolbarIndex) + html.substring(bodyCloseIndex);
+      }
+    }
     
     // Adjust padding since we removed header/toolbar
     html = html.replace('padding-top: 80px;', 'padding-top: 20px;');

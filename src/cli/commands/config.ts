@@ -16,7 +16,7 @@ export const configCommand = new Command('config')
           config.set(key, value);
           console.log(chalk.green(`✅ Set ${chalk.white(key)} = ${chalk.white(value)}`));
         } catch (error) {
-          console.error(chalk.red(`Failed to set configuration: ${error.message}`));
+          console.error(chalk.red(`Failed to set configuration: ${error instanceof Error ? error.message : String(error)}`));
           process.exit(1);
         }
       })
@@ -35,7 +35,7 @@ export const configCommand = new Command('config')
             console.log(chalk.yellow(`Configuration key '${key}' not found`));
           }
         } catch (error) {
-          console.error(chalk.red(`Failed to get configuration: ${error.message}`));
+          console.error(chalk.red(`Failed to get configuration: ${error instanceof Error ? error.message : String(error)}`));
           process.exit(1);
         }
       })
@@ -50,7 +50,7 @@ export const configCommand = new Command('config')
           console.log(chalk.cyan('Current Configuration:\\n'));
           console.log(JSON.stringify(allConfig, null, 2));
         } catch (error) {
-          console.error(chalk.red(`Failed to list configuration: ${error.message}`));
+          console.error(chalk.red(`Failed to list configuration: ${error instanceof Error ? error.message : String(error)}`));
           process.exit(1);
         }
       })
@@ -76,13 +76,13 @@ export const configCommand = new Command('config')
               initial: config.get('ai.defaultModel') === 'cloud' ? 1 : 0
             },
             {
-              type: prev => prev === 'local' ? 'text' : null,
+              type: (prev: any) => prev === 'local' ? 'text' : null,
               name: 'localEndpoint',
               message: 'LM Studio endpoint:',
               initial: config.get('ai.local.endpoint') || 'http://10.0.0.237:1234'
             },
             {
-              type: prev => prev === 'cloud' ? 'password' : null,
+              type: (prev: any) => prev === 'cloud' ? 'password' : null,
               name: 'openRouterKey',
               message: 'OpenRouter API key:',
               initial: config.get('ai.openrouter.key') || ''
@@ -104,7 +104,7 @@ export const configCommand = new Command('config')
           }
           
         } catch (error) {
-          console.error(chalk.red(`Failed to configure AI: ${error.message}`));
+          console.error(chalk.red(`Failed to configure AI: ${error instanceof Error ? error.message : String(error)}`));
           process.exit(1);
         }
       })

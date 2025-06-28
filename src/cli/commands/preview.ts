@@ -84,7 +84,7 @@ export const previewCommand = new Command('preview')
       
     } catch (error) {
       spinner.fail(chalk.red('Failed to start preview server'));
-      console.error(chalk.red(error.message));
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
       process.exit(1);
     }
   });

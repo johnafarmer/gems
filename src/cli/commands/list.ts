@@ -34,7 +34,7 @@ export const listCommand = new Command('list')
           console.log(chalk.gray(`   ${component.description}`));
         }
         console.log(chalk.gray(`   Created: ${new Date(component.created).toLocaleDateString()}`));
-        if (component.tags?.length > 0) {
+        if (component.tags && component.tags.length > 0) {
           console.log(chalk.gray(`   Tags: ${component.tags.join(', ')}`));
         }
         console.log();
@@ -43,7 +43,7 @@ export const listCommand = new Command('list')
       console.log(chalk.gray('Use `gems preview --component <name>` to preview a component'));
       
     } catch (error) {
-      console.error(chalk.red(`Failed to list components: ${error.message}`));
+      console.error(chalk.red(`Failed to list components: ${error instanceof Error ? error.message : String(error)}`));
       process.exit(1);
     }
   });
