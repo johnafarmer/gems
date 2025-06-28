@@ -76,12 +76,14 @@ export class PreviewServer {
               const elementNameMatch = jsContent.match(/customElements\.define\(['"]([^'"]+)['"]/);
               const elementName = elementNameMatch ? elementNameMatch[1] : 'unknown-element';
               
-              // Minify the JS code (basic minification)
+              // Minify the JS code (improved minification)
               const minified = jsContent
                 .replace(/\/\*[\s\S]*?\*\//g, '') // Remove block comments
-                .replace(/\/\/.*/g, '') // Remove line comments
-                .replace(/\s+/g, ' ') // Collapse whitespace
-                .replace(/\s*([{}:;,])\s*/g, '$1') // Remove spaces around punctuation
+                .replace(/\/\/.*$/gm, '') // Remove line comments
+                .replace(/\n\s*/g, ' ') // Replace newlines and indentation with single space
+                .replace(/\s+/g, ' ') // Collapse multiple spaces
+                .replace(/\s*([{}:;,=<>+\-*\/!])\s*/g, '$1') // Remove spaces around operators
+                .replace(/;\s*}/g, '}') // Remove unnecessary semicolons before closing braces
                 .trim();
               
               res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -695,7 +697,17 @@ export class PreviewServer {
       try {
         // Fetch component code
         const response = await fetch('/api/component-code?file=' + encodeURIComponent(path));
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch component code');
+        }
+        
         const data = await response.json();
+        
+        // Ensure we have the required data
+        if (!data.elementName || !data.minified) {
+          throw new Error('Invalid component data received');
+        }
         
         // Create WordPress-ready code
         const wordpressCode = \`<!-- GEMS Component: \${data.elementName} -->
@@ -716,20 +728,23 @@ export class PreviewServer {
         // Copy to clipboard
         await navigator.clipboard.writeText(wordpressCode);
         
-        // Show success state
-        const btn = document.querySelector(\`.file-item.active button.copy\`);
-        if (btn) {
-          const originalText = btn.innerHTML;
-          btn.innerHTML = '✅ Copied!';
-          btn.classList.add('success');
-          setTimeout(() => {
-            btn.innerHTML = originalText;
-            btn.classList.remove('success');
-          }, 2000);
+        // Show success state on the correct button
+        const activeItem = document.querySelector('.file-item.active');
+        if (activeItem) {
+          const btn = activeItem.querySelector('button.copy');
+          if (btn) {
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '✅ Copied!';
+            btn.classList.add('success');
+            setTimeout(() => {
+              btn.innerHTML = originalText;
+              btn.classList.remove('success');
+            }, 2000);
+          }
         }
       } catch (error) {
         console.error('Failed to copy:', error);
-        alert('Failed to copy component code');
+        alert('Failed to copy component code: ' + error.message);
       }
     }
     
