@@ -1,7 +1,7 @@
 {
   "name": "gems-cli",
   "version": "0.1.0",
-  "description": "Generative Element Management System - AI-powered WordPress component generator",
+  "description": "Generative Element Management System - AI-powered WordPress HTMLcomponent generator",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -57,7 +57,7 @@
     "web-components",
     "bun"
   ],
-  "author": "John",
+  "author": "https://github.com/johnafarmer",
   "license": "MIT",
   "engines": {
     "bun": ">=1.0.0"

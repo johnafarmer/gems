@@ -1,7 +1,9 @@
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { config as dotenvConfig } from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 
 interface Config {
   ai: {
@@ -54,9 +56,14 @@ export class ConfigManager {
   };
 
   constructor() {
-    // Load environment variables
-    dotenvConfig({ path: '.env' });
-    dotenvConfig({ path: '.env.local' });
+    // Get the project root directory (where package.json is)
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    const projectRoot = resolve(__dirname, '../..');
+    
+    // Load environment variables from project root
+    dotenvConfig({ path: join(projectRoot, '.env') });
+    dotenvConfig({ path: join(projectRoot, '.env.local') });
     
     const configDir = join(homedir(), '.gems');
     this.configPath = join(configDir, 'config.json');
@@ -90,6 +97,26 @@ export class ConfigManager {
     // Override with environment variables
     if (process.env.OPENROUTER_API_KEY) {
       this.config.ai.openrouter.key = process.env.OPENROUTER_API_KEY;
+      
+      // If OpenRouter is available and no model is set, default to Claude Sonnet 4
+      if (!this.config.ai.openrouter.model) {
+        this.config.ai.openrouter.model = 'anthropic/claude-sonnet-4';
+      }
+      
+      // If OpenRouter is available and defaultModel is not explicitly set in config file, prefer cloud
+      if (!existsSync(this.configPath)) {
+        this.config.ai.defaultModel = 'cloud';
+      } else {
+        try {
+          const savedConfig = JSON.parse(readFileSync(this.configPath, 'utf-8'));
+          if (!savedConfig.ai?.defaultModel) {
+            this.config.ai.defaultModel = 'cloud';
+          }
+        } catch {
+          // If we can't read the config, default to cloud when OpenRouter is available
+          this.config.ai.defaultModel = 'cloud';
+        }
+      }
     }
     
     if (process.env.LM_STUDIO_ENDPOINT) {

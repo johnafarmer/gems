@@ -26,7 +26,7 @@ Note: Put your description in quotes to ensure it's captured correctly.`)
   .option('-v, --variations <number>', 'Number of variations to generate', '1')
   .option('--voice', 'Use voice input')
   .option('--from-screenshot <path>', 'Generate from screenshot')
-  .option('--model <model>', 'AI model to use (local, cloud)', 'local')
+  .option('--model <model>', 'AI model to use (local, cloud)')
   .option('--save <name>', 'Save to component library')
   .option('--no-preview', 'Skip auto-preview after generation')
   .action(async (type, description, options) => {
@@ -124,10 +124,20 @@ Note: Put your description in quotes to ensure it's captured correctly.`)
       const modelType = options.model || config.get('ai.defaultModel');
       
       // Use terminal effects for generation with source info
+      const sourceInfo: any = { type: modelType === 'local' ? 'local' : 'cloud' };
+      
+      // Add model details
+      if (modelType === 'cloud') {
+        sourceInfo.model = config.get('ai.openrouter.model') || 'OpenRouter';
+      } else {
+        sourceInfo.model = config.get('ai.local.model') || 'Local Model';
+        sourceInfo.endpoint = config.get('ai.local.endpoint');
+      }
+      
       const stopAnimation = await TerminalEffects.showGeneratingAnimation(
         componentType, 
         componentDescription || '',
-        { type: modelType === 'local' ? 'local' : 'cloud' } as any
+        sourceInfo
       );
       
       // Generate component
@@ -139,7 +149,7 @@ Note: Put your description in quotes to ensure it's captured correctly.`)
         styleContent: (options as any).styleContent,
         outputFormat: options.output,
         variations: parseInt(options.variations),
-        model: options.model,
+        model: modelType,
         screenshot: options.fromScreenshot
       });
       

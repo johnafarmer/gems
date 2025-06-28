@@ -157,38 +157,135 @@ export const aiCommand = new Command('ai')
       if (selection.model.type === 'cloud') {
         console.log(chalk.cyan('\n☁️  Select OpenRouter Model\n'));
         
-        const cloudModels = [
-          {
-            title: '🚀 Claude 3.5 Sonnet',
-            value: 'anthropic/claude-3.5-sonnet',
-            description: 'Best for complex components'
-          },
-          {
-            title: '⚡ GPT-4o',
-            value: 'openai/gpt-4o',
-            description: 'Fast and capable'
-          },
-          {
-            title: '✨ o1-preview',
-            value: 'openai/o1-preview',
-            description: 'Advanced reasoning'
-          },
-          {
-            title: '🏃 Gemini 2.0 Flash' + chalk.green(' (Free)'),
-            value: 'google/gemini-2.0-flash-exp:free',
-            description: 'Free and fast'
-          },
-          {
-            title: '🧠 Gemini Pro',
-            value: 'google/gemini-pro-1.5',
-            description: 'Powerful and versatile'
-          },
-          {
-            title: '➕ Add Custom Model',
-            value: 'custom',
-            description: 'Enter any OpenRouter model'
+        // Try to fetch user's available models
+        const fetchingSpinner = ora('Fetching your available models...').start();
+        let userModels: any[] = [];
+        
+        try {
+          const response = await fetch('https://openrouter.ai/api/v1/models', {
+            headers: {
+              'Authorization': `Bearer ${config.get('ai.openrouter.key')}`,
+              'HTTP-Referer': 'https://github.com/gems-cli',
+              'X-Title': 'GEMS CLI'
+            }
+          });
+          
+          if (response.ok) {
+            const data = await response.json() as any;
+            // Filter to models the user likely has access to and sort by popularity/relevance
+            userModels = data.data
+              .filter((m: any) => {
+                // Include popular models and free models
+                const isPopular = m.id.includes('claude') || m.id.includes('gpt-4') || 
+                                 m.id.includes('gemini') || m.id.includes('o3') || 
+                                 m.id.includes('o1') || m.pricing?.prompt === 0;
+                return isPopular;
+              })
+              .sort((a: any, b: any) => {
+                // Sort by: Claude first, then OpenAI, then Google, then free models
+                const getPriority = (id: string) => {
+                  if (id.includes('claude')) return 0;
+                  if (id.includes('gpt-4') || id.includes('o3')) return 1;
+                  if (id.includes('gemini')) return 2;
+                  return 3;
+                };
+                return getPriority(a.id) - getPriority(b.id);
+              })
+              .slice(0, 15); // Show top 15 models
+            
+            fetchingSpinner.succeed('Found your available models!');
+          } else {
+            fetchingSpinner.fail('Could not fetch models from OpenRouter');
           }
-        ];
+        } catch (error) {
+          fetchingSpinner.fail('Could not fetch models from OpenRouter');
+        }
+        
+        let cloudModels = [];
+        
+        // If we successfully fetched models, use those
+        if (userModels.length > 0) {
+          cloudModels = userModels.map((model: any) => {
+            // Create nice titles for known models
+            let title = model.id;
+            let icon = '🤖';
+            
+            if (model.id.includes('claude')) {
+              icon = '🚀';
+              if (model.id.includes('sonnet-4')) title = 'Claude Sonnet 4';
+              else if (model.id.includes('3.5-sonnet')) title = 'Claude 3.5 Sonnet';
+              else if (model.id.includes('3.7-sonnet')) title = 'Claude 3.7 Sonnet';
+            } else if (model.id.includes('gpt-4o')) {
+              icon = '⚡';
+              title = 'GPT-4o';
+            } else if (model.id.includes('o3')) {
+              icon = '✨';
+              if (model.id === 'openai/o3') title = 'o3';
+              else if (model.id === 'openai/o3-mini') title = 'o3-mini';
+              else if (model.id === 'openai/o3-pro') title = 'o3-pro';
+            } else if (model.id.includes('gemini')) {
+              icon = '🏃';
+              if (model.id.includes('2.5-flash')) title = 'Gemini 2.5 Flash';
+              else if (model.id.includes('2.5-pro')) title = 'Gemini 2.5 Pro';
+              else if (model.id.includes('2.0-flash')) title = 'Gemini 2.0 Flash';
+            }
+            
+            // Add pricing info
+            const isFree = model.pricing?.prompt === 0;
+            if (isFree) {
+              title += chalk.green(' (Free)');
+            }
+            
+            return {
+              title: `${icon} ${title}`,
+              value: model.id,
+              description: `Context: ${(model.context_length / 1000).toFixed(0)}k${isFree ? ' • Free tier' : ''}`
+            };
+          });
+          
+          // Add browse all models option
+          cloudModels.push({
+            title: '🔍 Browse All Models',
+            value: 'browse',
+            description: 'See all available models on OpenRouter'
+          });
+        } else {
+          // Fallback to predefined models if fetch failed
+          cloudModels = [
+            {
+              title: '🚀 Claude Sonnet 4',
+              value: 'anthropic/claude-sonnet-4',
+              description: 'Best for complex components'
+            },
+            {
+              title: '⚡ GPT-4o',
+              value: 'openai/gpt-4o',
+              description: 'Fast and capable'
+            },
+            {
+              title: '✨ o3-mini',
+              value: 'openai/o3-mini',
+              description: 'Advanced reasoning, more accessible'
+            },
+            {
+              title: '🏃 Gemini 2.5 Flash',
+              value: 'google/gemini-2.5-flash',
+              description: 'Lightning fast responses'
+            },
+            {
+              title: '🧠 Gemini 2.5 Pro',
+              value: 'google/gemini-2.5-pro',
+              description: 'Powerful and versatile'
+            }
+          ];
+        }
+        
+        // Always add custom model option
+        cloudModels.push({
+          title: '➕ Add Custom Model',
+          value: 'custom',
+          description: 'Enter any OpenRouter model ID'
+        });
         
         const modelSelection = await prompts({
           type: 'select',
@@ -197,7 +294,48 @@ export const aiCommand = new Command('ai')
           choices: cloudModels
         });
         
-        if (modelSelection.cloudModel === 'custom') {
+        if (modelSelection.cloudModel === 'browse') {
+          // Show all available models
+          console.log(chalk.cyan('\n📋 All Available Models\n'));
+          
+          try {
+            const response = await fetch('https://openrouter.ai/api/v1/models', {
+              headers: {
+                'Authorization': `Bearer ${config.get('ai.openrouter.key')}`,
+                'HTTP-Referer': 'https://github.com/gems-cli',
+                'X-Title': 'GEMS CLI'
+              }
+            });
+            
+            if (response.ok) {
+              const data = await response.json() as any;
+              const allModels = data.data
+                .sort((a: any, b: any) => a.id.localeCompare(b.id))
+                .map((m: any) => ({
+                  title: `${m.id} ${m.pricing?.prompt === 0 ? chalk.green('(Free)') : ''}`,
+                  value: m.id,
+                  description: `Context: ${(m.context_length / 1000).toFixed(0)}k`
+                }));
+              
+              const browseSelection = await prompts({
+                type: 'autocomplete',
+                name: 'model',
+                message: 'Search and select a model',
+                choices: allModels,
+                limit: 20
+              });
+              
+              if (browseSelection.model) {
+                config.set('ai.openrouter.model', browseSelection.model);
+                config.set('ai.defaultModel', 'cloud');
+                console.log(chalk.green(`\n✅ Set to use ${browseSelection.model} via OpenRouter`));
+              }
+            }
+          } catch (error) {
+            console.log(chalk.red('Failed to fetch all models'));
+          }
+          
+        } else if (modelSelection.cloudModel === 'custom') {
           const customModel = await prompts({
             type: 'text',
             name: 'model',

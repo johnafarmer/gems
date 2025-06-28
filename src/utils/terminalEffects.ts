@@ -53,11 +53,15 @@ export class TerminalEffects {
       if (source) {
         let sourceText = '';
         if (source.type === 'local') {
-          sourceText = chalk.cyan('🖥️  Local LM Studio');
+          const modelName = source.model?.split('/').pop() || 'Local Model';
+          sourceText = chalk.cyan('🖥️  Local LM Studio: ') + chalk.white(modelName);
         } else if (source.type === 'network') {
-          sourceText = chalk.magenta('🌐 Network: ') + chalk.dim(source.endpoint || 'Watson');
+          const endpoint = source.endpoint?.split('//')[1]?.split(':')[0] || 'Network';
+          const modelName = source.model?.split('/').pop() || 'Network Model';
+          sourceText = chalk.magenta('🌐 Network (') + chalk.white(endpoint) + chalk.magenta('): ') + chalk.white(modelName);
         } else if (source.type === 'cloud') {
-          sourceText = chalk.yellow('☁️  OpenRouter: ') + chalk.dim(source.model?.split('/').pop() || 'Cloud Model');
+          const modelName = this.formatModelName(source.model || 'Cloud Model');
+          sourceText = chalk.yellow('☁️  OpenRouter: ') + chalk.white(modelName);
         } else if (source.type === 'template') {
           sourceText = chalk.gray('📝 Template Mode');
         }
@@ -166,12 +170,15 @@ export class TerminalEffects {
     if (source) {
       let sourceText = '';
       if (source.type === 'local') {
-        sourceText = chalk.cyan('Generated with Local LM Studio');
+        const modelName = source.model?.split('/').pop() || 'Local Model';
+        sourceText = chalk.cyan('Generated with Local LM Studio (') + chalk.white(modelName) + chalk.cyan(')');
       } else if (source.type === 'network') {
         const endpoint = source.endpoint?.split('//')[1]?.split(':')[0] || 'Network';
-        sourceText = chalk.magenta(`Generated with ${endpoint} (${source.model?.split('/').pop() || 'Network Model'})`);
+        const modelName = source.model?.split('/').pop() || 'Network Model';
+        sourceText = chalk.magenta(`Generated with ${endpoint} (`) + chalk.white(modelName) + chalk.magenta(')');
       } else if (source.type === 'cloud') {
-        sourceText = chalk.yellow(`Generated with OpenRouter (${source.model?.split('/').pop() || 'Cloud Model'})`);
+        const modelName = this.formatModelName(source.model || 'Cloud Model');
+        sourceText = chalk.yellow('Generated with OpenRouter (') + chalk.white(modelName) + chalk.yellow(')');
       } else if (source.type === 'template') {
         sourceText = chalk.gray('Generated from Template');
       }
@@ -205,5 +212,23 @@ export class TerminalEffects {
     
     if (currentLine) lines.push(currentLine);
     return lines.join('\n');
+  }
+  
+  private static formatModelName(model: string): string {
+    // Handle common model formats
+    if (model.includes('claude-sonnet-4')) return 'Claude Sonnet 4';
+    if (model.includes('claude-3.5-sonnet')) return 'Claude 3.5 Sonnet';
+    if (model.includes('claude-3.7-sonnet')) return 'Claude 3.7 Sonnet';
+    if (model.includes('gpt-4o')) return 'GPT-4o';
+    if (model.includes('o3-mini')) return 'o3-mini';
+    if (model.includes('o3-pro')) return 'o3-pro';
+    if (model.includes('o3')) return 'o3';
+    if (model.includes('gemini-2.5-flash')) return 'Gemini 2.5 Flash';
+    if (model.includes('gemini-2.5-pro')) return 'Gemini 2.5 Pro';
+    if (model.includes('gemini-2.0-flash')) return 'Gemini 2.0 Flash';
+    if (model.includes('devstral')) return 'Devstral';
+    
+    // Default: just return the last part of the model path
+    return model.split('/').pop() || model;
   }
 }

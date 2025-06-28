@@ -143,24 +143,21 @@ async function guidedComponentCreation(): Promise<void> {
     return;
   }
   
-  // Step 2: Description
-  let description = '';
-  if (componentType === 'custom' || await shouldCustomizeComponent()) {
-    const response = await prompts({
-      type: 'text',
-      name: 'description',
-      message: 'Describe the component you want:',
-      initial: componentType === 'custom' ? '' : `A ${componentType} component`,
-      validate: (value: string) => value.length > 0 || 'Please provide a description'
-    });
-    
-    if (!response.description) {
-      console.log(chalk.yellow('Component creation cancelled.'));
-      return;
-    }
-    
-    description = response.description;
+  // Step 2: Always get description
+  const response = await prompts({
+    type: 'text',
+    name: 'description',
+    message: 'Describe the component you want:',
+    initial: componentType === 'custom' ? '' : `A ${componentType} component`,
+    validate: (value: string) => value.length > 0 || 'Please provide a description'
+  });
+  
+  if (!response.description) {
+    console.log(chalk.yellow('Component creation cancelled.'));
+    return;
   }
+  
+  const description = response.description;
   
   // Build args for create command
   const args = ['', ''];
@@ -175,16 +172,6 @@ async function guidedComponentCreation(): Promise<void> {
   await createCommand.parseAsync(args);
 }
 
-async function shouldCustomizeComponent(): Promise<boolean> {
-  const { customize } = await prompts({
-    type: 'confirm',
-    name: 'customize',
-    message: 'Would you like to customize the description?',
-    initial: false
-  });
-  
-  return customize;
-}
 
 async function configurationMenu(): Promise<void> {
   console.log(chalk.cyan('⚙️  Configuration Menu\n'));

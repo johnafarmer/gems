@@ -358,11 +358,14 @@ export class PreviewServer {
       margin-bottom: 0.75rem;
       transition: all 0.3s ease;
       position: relative;
-      overflow: hidden;
+      overflow: visible;
     }
     
     .file-content {
       cursor: pointer;
+      position: relative;
+      z-index: 5;
+      pointer-events: auto;
     }
     
     .file-item:hover {
@@ -487,6 +490,9 @@ export class PreviewServer {
       cursor: pointer;
       transition: all 0.2s ease;
       font-family: 'OpenDyslexic', system-ui, -apple-system, sans-serif;
+      position: relative;
+      z-index: 10;
+      pointer-events: auto;
     }
     
     .file-actions button:hover {
@@ -649,11 +655,16 @@ export class PreviewServer {
   </div>
   
   <script>
+    // Define functions in global scope first
     let currentlyLoading = false;
     let componentToDelete = null;
     
     function loadComponent(path) {
-      if (currentlyLoading) return;
+      console.log('loadComponent called with path:', path);
+      if (currentlyLoading) {
+        console.log('Already loading, skipping');
+        return;
+      }
       
       // Update active state
       document.querySelectorAll('.file-item').forEach(item => {
@@ -672,6 +683,7 @@ export class PreviewServer {
       
       // Update iframe
       const iframe = document.querySelector('.preview-frame');
+      console.log('iframe found:', !!iframe);
       if (iframe) {
         currentlyLoading = true;
         
@@ -682,18 +694,22 @@ export class PreviewServer {
         
         // Load new component
         iframe.src = '/generated/' + path;
+        console.log('Set iframe src to:', iframe.src);
         
         iframe.onload = () => {
+          console.log('iframe loaded');
           mainContent.style.opacity = '1';
           currentlyLoading = false;
         };
       } else {
         // No iframe yet, reload page
+        console.log('No iframe, reloading page');
         window.location.href = '/?component=' + encodeURIComponent(path);
       }
     }
     
     async function copyComponent(path) {
+      console.log('copyComponent called with path:', path);
       try {
         // Fetch component code
         const response = await fetch('/api/component-code?file=' + encodeURIComponent(path));
@@ -711,12 +727,12 @@ export class PreviewServer {
         
         // Create WordPress-ready code
         const wordpressCode = \`<!-- GEMS Component: \${data.elementName} -->
-<script>
+<scr\` + \`ipt>
 (function() {
   if (customElements.get('\${data.elementName}')) return;
   \${data.minified}
 })();
-</script>
+</scr\` + \`ipt>
 <\${data.elementName}></\${data.elementName}>
 <style>
 \${data.elementName} {
@@ -825,37 +841,99 @@ export class PreviewServer {
     });
     
     // Set up event delegation for file list clicks
-    // Do this immediately, not in DOMContentLoaded
-    const fileList = document.querySelector('.file-list');
-    if (fileList) {
-      fileList.addEventListener('click', (e) => {
-        e.preventDefault();
-        
-        // Handle file content clicks
-        const fileContent = e.target.closest('.file-content');
-        if (fileContent) {
-          const path = fileContent.dataset.path;
-          if (path) {
-            loadComponent(path);
-          }
-          return;
-        }
-        
-        // Handle action button clicks
-        const button = e.target.closest('button');
-        if (button && button.dataset.path) {
-          const path = button.dataset.path;
+    // Use setTimeout to ensure DOM is ready
+    setTimeout(() => {
+      const fileList = document.querySelector('.file-list');
+      console.log('Setting up file list event handlers, fileList found:', !!fileList);
+      
+      if (fileList) {
+        fileList.addEventListener('click', (e) => {
+          console.log('File list clicked, target:', e.target);
           
-          if (button.classList.contains('copy')) {
+          // Handle file content clicks (for switching components)
+          const fileContent = e.target.closest('.file-content');
+          if (fileContent) {
+            e.preventDefault();
+            e.stopPropagation();
+            const path = fileContent.dataset.path;
+            console.log('File content clicked, path:', path);
+            if (path) {
+              loadComponent(path);
+            }
+            return;
+          }
+          
+          // Handle action button clicks
+          const button = e.target.closest('button');
+          if (button && button.dataset.path) {
+            e.preventDefault();
+            e.stopPropagation();
+            const path = button.dataset.path;
+            console.log('Button clicked:', button.className, 'for path:', path);
+            
+            if (button.classList.contains('copy')) {
+              copyComponent(path);
+            } else if (button.classList.contains('rename')) {
+              renameComponent(path);
+            } else if (button.classList.contains('delete')) {
+              deleteComponent(path);
+            }
+          }
+        });
+        
+        // Also add direct click handlers to buttons as a fallback
+        document.querySelectorAll('.file-actions button').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const button = e.target;
+            const path = button.dataset.path;
+            console.log('Direct button click:', button.className, 'for path:', path);
+            
+            if (path) {
+              if (button.classList.contains('copy')) {
+                copyComponent(path);
+              } else if (button.classList.contains('rename')) {
+                renameComponent(path);
+              } else if (button.classList.contains('delete')) {
+                deleteComponent(path);
+              }
+            }
+          });
+        });
+      } else {
+        console.error('File list not found!');
+      }
+    }, 100);
+    
+    // Attach handlers at the very end, after all functions are defined
+    document.querySelectorAll('.file-content').forEach(el => {
+      el.onclick = function(e) {
+        e.preventDefault();
+        const path = this.dataset.path;
+        if (path) {
+          loadComponent(path);
+        }
+      };
+    });
+    
+    document.querySelectorAll('.file-actions button').forEach(btn => {
+      btn.onclick = function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const path = this.dataset.path;
+        
+        if (path) {
+          if (this.classList.contains('copy')) {
             copyComponent(path);
-          } else if (button.classList.contains('rename')) {
+          } else if (this.classList.contains('rename')) {
             renameComponent(path);
-          } else if (button.classList.contains('delete')) {
+          } else if (this.classList.contains('delete')) {
             deleteComponent(path);
           }
         }
-      });
-    }
+      };
+    });
   </script>
 </body>
 </html>
