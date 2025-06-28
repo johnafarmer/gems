@@ -226,62 +226,204 @@ customElements.define('${options.type}-component', ${this.toPascalCase(options.t
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${elementName} - GEMS Component</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=OpenDyslexic:wght@400;700&display=swap" rel="stylesheet">
   <style>
+    * {
+      box-sizing: border-box;
+    }
+    
+    :root {
+      --rainbow-1: #ff0000;
+      --rainbow-2: #ff7f00;
+      --rainbow-3: #ffff00;
+      --rainbow-4: #00ff00;
+      --rainbow-5: #0000ff;
+      --rainbow-6: #4b0082;
+      --rainbow-7: #9400d3;
+    }
+    
+    @keyframes rainbow-border {
+      0% { border-color: var(--rainbow-1); }
+      14% { border-color: var(--rainbow-2); }
+      28% { border-color: var(--rainbow-3); }
+      42% { border-color: var(--rainbow-4); }
+      57% { border-color: var(--rainbow-5); }
+      71% { border-color: var(--rainbow-6); }
+      85% { border-color: var(--rainbow-7); }
+      100% { border-color: var(--rainbow-1); }
+    }
+    
+    @keyframes rainbow-glow {
+      0% { text-shadow: 0 0 20px var(--rainbow-1); }
+      14% { text-shadow: 0 0 20px var(--rainbow-2); }
+      28% { text-shadow: 0 0 20px var(--rainbow-3); }
+      42% { text-shadow: 0 0 20px var(--rainbow-4); }
+      57% { text-shadow: 0 0 20px var(--rainbow-5); }
+      71% { text-shadow: 0 0 20px var(--rainbow-6); }
+      85% { text-shadow: 0 0 20px var(--rainbow-7); }
+      100% { text-shadow: 0 0 20px var(--rainbow-1); }
+    }
+    
     body {
       margin: 0;
       padding: 0;
-      font-family: system-ui, -apple-system, sans-serif;
+      font-family: 'OpenDyslexic', system-ui, -apple-system, sans-serif;
       min-height: 100vh;
+      background: #000;
+      color: #fff;
       position: relative;
+      overflow-x: hidden;
     }
     
+    /* Animated background */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle at 20% 80%, rgba(103, 126, 234, 0.1) 0%, transparent 50%),
+                  radial-gradient(circle at 80% 20%, rgba(118, 75, 162, 0.1) 0%, transparent 50%),
+                  radial-gradient(circle at 40% 40%, rgba(255, 0, 255, 0.05) 0%, transparent 50%);
+      animation: rotate 30s linear infinite;
+      z-index: -1;
+    }
+    
+    @keyframes rotate {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    /* Component container */
+    .component-container {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      position: relative;
+      z-index: 1;
+    }
+    
+    /* GEMS header */
+    .gems-header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 1.5rem 2rem;
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      z-index: 1000;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .gems-logo {
+      font-size: 1.5rem;
+      font-weight: 700;
+      animation: rainbow-glow 3s linear infinite;
+    }
+    
+    .component-info {
+      font-size: 0.875rem;
+      opacity: 0.8;
+    }
+    
+    /* Glassmorphism toolbar */
     .gems-toolbar {
       position: fixed;
-      top: 20px;
-      right: 20px;
-      background: rgba(0, 0, 0, 0.8);
-      color: white;
-      padding: 10px;
-      border-radius: 8px;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      padding: 1rem;
+      border-radius: 20px;
       display: flex;
-      gap: 10px;
-      z-index: 9999;
+      gap: 1rem;
+      z-index: 1000;
+      border: 2px solid transparent;
+      animation: rainbow-border 3s linear infinite;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     }
     
     .gems-toolbar button {
-      background: #667eea;
+      background: rgba(255, 255, 255, 0.1);
       color: white;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      padding: 0.75rem 1.5rem;
+      border-radius: 12px;
       cursor: pointer;
-      font-size: 14px;
-      transition: background 0.2s;
+      font-size: 0.875rem;
+      font-family: 'OpenDyslexic', system-ui, -apple-system, sans-serif;
+      transition: all 0.3s ease;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
     }
     
     .gems-toolbar button:hover {
-      background: #764ba2;
+      background: rgba(255, 255, 255, 0.2);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(103, 126, 234, 0.4);
     }
     
-    .gems-toolbar .success {
-      background: #10b981;
+    .gems-toolbar button.success {
+      background: rgba(16, 185, 129, 0.3);
+      border-color: rgba(16, 185, 129, 0.5);
+    }
+    
+    /* Component wrapper for spacing */
+    .component-wrapper {
+      width: 100%;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding-top: 80px; /* Space for header */
+      padding-bottom: 100px; /* Space for toolbar */
+    }
+    
+    /* Ensure component is visible */
+    ${elementName} {
+      display: block;
+      width: 100%;
     }
   </style>
 </head>
 <body>
-  <!-- GEMS Toolbar -->
-  <div class="gems-toolbar">
-    <button onclick="copyForElementor()">Copy for Elementor</button>
-    <button onclick="copyComponent()">Copy Component Code</button>
+  <!-- GEMS Header -->
+  <header class="gems-header">
+    <div class="gems-logo">GEMS ✨</div>
+    <div class="component-info">${elementName}</div>
+  </header>
+
+  <!-- Component Container -->
+  <div class="component-container">
+    <div class="component-wrapper">
+      <!-- Load the web component -->
+      <script src="./${componentName}.js"></script>
+      
+      <!-- Use the component -->
+      <${elementName}></${elementName}>
+    </div>
   </div>
 
-  <!-- Load the web component -->
-  <script src="./${componentName}.js"></script>
-  
-  <!-- Use the component -->
-  <${elementName}></${elementName}>
+  <!-- GEMS Toolbar -->
+  <div class="gems-toolbar">
+    <button onclick="copyForElementor()">✨ Copy for Elementor</button>
+    <button onclick="copyComponent()">📄 Copy Component Code</button>
+  </div>
   
   <script>
+    // Minified component code for Elementor
+    const minifiedJs = ${JSON.stringify(minifiedJs)};
+    
     // Store the component code for copying
     const componentCode = ${JSON.stringify(jsCode)};
     const elementName = ${JSON.stringify(elementName)};
@@ -291,7 +433,7 @@ customElements.define('${options.type}-component', ${this.toPascalCase(options.t
 <script>
 (function() {
   if (customElements.get('\${elementName}')) return;
-  ${JSON.stringify(minifiedJs).slice(1, -1)}
+  \${minifiedJs}
 })();
 </script>
 <\${elementName}></\${elementName}>
@@ -304,11 +446,11 @@ customElements.define('${options.type}-component', ${this.toPascalCase(options.t
       
       navigator.clipboard.writeText(elementorCode).then(() => {
         const btn = event.target;
-        const originalText = btn.textContent;
-        btn.textContent = '✓ Copied!';
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '✅ Copied!';
         btn.classList.add('success');
         setTimeout(() => {
-          btn.textContent = originalText;
+          btn.innerHTML = originalText;
           btn.classList.remove('success');
         }, 2000);
       });
@@ -317,11 +459,11 @@ customElements.define('${options.type}-component', ${this.toPascalCase(options.t
     function copyComponent() {
       navigator.clipboard.writeText(componentCode).then(() => {
         const btn = event.target;
-        const originalText = btn.textContent;
-        btn.textContent = '✓ Copied!';
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '✅ Copied!';
         btn.classList.add('success');
         setTimeout(() => {
-          btn.textContent = originalText;
+          btn.innerHTML = originalText;
           btn.classList.remove('success');
         }, 2000);
       });
