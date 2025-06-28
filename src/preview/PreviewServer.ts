@@ -1,6 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { join, extname } from 'path';
-import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, statSync, unlinkSync, renameSync } from 'fs';
 import { createElementorComponent } from '../utils/componentMinifier.js';
 
 export interface PreviewServerOptions {
@@ -23,6 +23,79 @@ export class PreviewServer {
         if (pathname === '/') {
           res.writeHead(200, { 'Content-Type': 'text/html' });
           res.end(this.getIndexHtml(component));
+        } else if (pathname === '/api/rename' && req.method === 'POST') {
+          // Handle rename
+          let body = '';
+          req.on('data', chunk => body += chunk);
+          req.on('end', () => {
+            try {
+              const { oldName, newName } = JSON.parse(body);
+              const oldHtml = join(process.cwd(), 'generated', oldName);
+              const oldJs = oldHtml.replace('.html', '.js');
+              const newHtml = join(process.cwd(), 'generated', newName);
+              const newJs = newHtml.replace('.html', '.js');
+              
+              if (existsSync(oldHtml)) renameSync(oldHtml, newHtml);
+              if (existsSync(oldJs)) renameSync(oldJs, newJs);
+              
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: true }));
+            } catch (error) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: error.message }));
+            }
+          });
+        } else if (pathname === '/api/delete' && req.method === 'POST') {
+          // Handle delete
+          let body = '';
+          req.on('data', chunk => body += chunk);
+          req.on('end', () => {
+            try {
+              const { filename } = JSON.parse(body);
+              const htmlPath = join(process.cwd(), 'generated', filename);
+              const jsPath = htmlPath.replace('.html', '.js');
+              
+              if (existsSync(htmlPath)) unlinkSync(htmlPath);
+              if (existsSync(jsPath)) unlinkSync(jsPath);
+              
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: true }));
+            } catch (error) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: error.message }));
+            }
+          });
+        } else if (pathname === '/api/component-code' && req.method === 'GET') {
+          // Get component code for copying
+          const filename = parsedUrl.searchParams.get('file');
+          if (filename) {
+            try {
+              const jsPath = join(process.cwd(), 'generated', filename.replace('.html', '.js'));
+              const jsContent = readFileSync(jsPath, 'utf-8');
+              
+              // Extract element name from the customElements.define call
+              const elementNameMatch = jsContent.match(/customElements\.define\(['"]([^'"]+)['"]/);
+              const elementName = elementNameMatch ? elementNameMatch[1] : 'unknown-element';
+              
+              // Minify the JS code (basic minification)
+              const minified = jsContent
+                .replace(/\/\*[\s\S]*?\*\//g, '') // Remove block comments
+                .replace(/\/\/.*/g, '') // Remove line comments
+                .replace(/\s+/g, ' ') // Collapse whitespace
+                .replace(/\s*([{}:;,])\s*/g, '$1') // Remove spaces around punctuation
+                .trim();
+              
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ 
+                elementName,
+                code: jsContent,
+                minified
+              }));
+            } catch (error) {
+              res.writeHead(404, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Component not found' }));
+            }
+          }
         } else if (pathname.startsWith('/generated/')) {
           // Serve files from generated directory
           const filePath = join(process.cwd(), pathname.slice(1));
@@ -83,11 +156,16 @@ export class PreviewServer {
     }
     
     const selectedComponent = component || (componentFiles[0]?.name);
-    const fileList = componentFiles.map(f => ({
-      name: f.name.replace('.html', ''),
-      path: f.name,
-      time: f.time.toLocaleString()
-    }));
+    const fileList = componentFiles.map(f => {
+      // Extract component type from filename (e.g., hero-1234.html -> hero)
+      const componentType = f.name.split('-')[0];
+      return {
+        name: f.name.replace('.html', ''),
+        path: f.name,
+        time: f.time.toLocaleString(),
+        type: componentType
+      };
+    });
     
     return `
 <!DOCTYPE html>
@@ -277,15 +355,17 @@ export class PreviewServer {
       border-radius: 12px;
       padding: 1rem;
       margin-bottom: 0.75rem;
-      cursor: pointer;
       transition: all 0.3s ease;
       position: relative;
       overflow: hidden;
     }
     
+    .file-content {
+      cursor: pointer;
+    }
+    
     .file-item:hover {
       background: rgba(255, 255, 255, 0.1);
-      transform: translateX(5px);
       border-color: rgba(255, 255, 255, 0.2);
     }
     
@@ -293,6 +373,23 @@ export class PreviewServer {
       background: rgba(103, 126, 234, 0.2);
       border: 1px solid transparent;
       animation: rainbow-border 3s linear infinite;
+      transform: translateX(10px);
+    }
+    
+    .file-item.active::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: linear-gradient(to bottom, var(--rainbow-1), var(--rainbow-7));
+      animation: rainbow-gradient 3s linear infinite;
+    }
+    
+    @keyframes rainbow-gradient {
+      0% { filter: hue-rotate(0deg); }
+      100% { filter: hue-rotate(360deg); }
     }
     
     .file-item.newest {
@@ -366,6 +463,134 @@ export class PreviewServer {
       border-radius: 4px;
       font-family: 'OpenDyslexic Mono', monospace;
     }
+    
+    /* Action buttons */
+    .file-actions {
+      margin-top: 0.75rem;
+      display: none;
+      gap: 0.5rem;
+      transition: opacity 0.2s ease;
+    }
+    
+    .file-item.active .file-actions {
+      display: flex;
+    }
+    
+    .file-actions button {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: white;
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-family: 'OpenDyslexic', system-ui, -apple-system, sans-serif;
+    }
+    
+    .file-actions button:hover {
+      background: rgba(255, 255, 255, 0.2);
+      transform: translateY(-1px);
+    }
+    
+    .file-actions button.copy {
+      background: rgba(103, 126, 234, 0.3);
+      border-color: rgba(103, 126, 234, 0.5);
+      flex: 1;
+    }
+    
+    .file-actions button.copy:hover {
+      background: rgba(103, 126, 234, 0.5);
+    }
+    
+    .file-actions button.delete {
+      background: rgba(239, 68, 68, 0.3);
+      border-color: rgba(239, 68, 68, 0.5);
+    }
+    
+    .file-actions button.delete:hover {
+      background: rgba(239, 68, 68, 0.5);
+    }
+    
+    /* Modal styles */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(10px);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .modal.show {
+      display: flex;
+    }
+    
+    .modal-content {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 16px;
+      padding: 2rem;
+      max-width: 400px;
+      text-align: center;
+      position: relative;
+      animation: modalSlideIn 0.3s ease;
+    }
+    
+    @keyframes modalSlideIn {
+      from {
+        transform: translateY(-20px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+    
+    .modal-buttons {
+      display: flex;
+      gap: 1rem;
+      margin-top: 1.5rem;
+      justify-content: center;
+    }
+    
+    .modal-buttons button {
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.1);
+      color: white;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-family: 'OpenDyslexic', system-ui, -apple-system, sans-serif;
+    }
+    
+    .modal-buttons button:hover {
+      background: rgba(255, 255, 255, 0.2);
+      transform: translateY(-2px);
+    }
+    
+    .modal-buttons button.confirm {
+      background: rgba(239, 68, 68, 0.5);
+      border-color: rgba(239, 68, 68, 0.6);
+    }
+    
+    .modal-buttons button.confirm:hover {
+      background: rgba(239, 68, 68, 0.7);
+    }
+    
+    /* Success state for copy button */
+    .file-actions button.success {
+      background: rgba(16, 185, 129, 0.5) !important;
+      border-color: rgba(16, 185, 129, 0.6) !important;
+    }
   </style>
 </head>
 <body>
@@ -378,9 +603,17 @@ export class PreviewServer {
       <div class="file-list">
         ${componentFiles.length > 0 ? fileList.map((file, index) => `
           <div class="file-item ${file.path === selectedComponent ? 'active' : ''} ${index === 0 ? 'newest' : ''}" 
-               onclick="loadComponent('${file.path}')">
-            <div class="file-name">${file.name}</div>
-            <div class="file-time">${file.time}</div>
+               data-component="${file.path}">
+            <div class="file-content" data-path="${file.path}">
+              <div class="file-type" style="font-size: 0.75rem; opacity: 0.7; text-transform: uppercase; margin-bottom: 0.25rem;">${file.type}</div>
+              <div class="file-name">${file.name}</div>
+              <div class="file-time">${file.time}</div>
+            </div>
+            <div class="file-actions">
+              <button class="copy" data-path="${file.path}">📋 Copy Code</button>
+              <button class="rename" data-path="${file.path}">✏️</button>
+              <button class="delete" data-path="${file.path}">🗑️</button>
+            </div>
           </div>
         `).join('') : `
           <div class="empty-state">
@@ -401,22 +634,210 @@ export class PreviewServer {
     </main>
   </div>
   
+  <!-- Delete confirmation modal -->
+  <div class="modal" id="deleteModal">
+    <div class="modal-content">
+      <h3 style="margin-top: 0;">⚠️ Delete Component?</h3>
+      <p>Are you sure you want to delete <strong id="deleteComponentName"></strong>?</p>
+      <p style="font-size: 0.875rem; opacity: 0.7;">This action cannot be undone!</p>
+      <div class="modal-buttons">
+        <button onclick="cancelDelete()">Cancel</button>
+        <button class="confirm" onclick="confirmDelete()">Delete</button>
+      </div>
+    </div>
+  </div>
+  
   <script>
-    function loadComponent(path) {
-      window.location.href = '/?component=' + encodeURIComponent(path);
-    }
+    let currentlyLoading = false;
+    let componentToDelete = null;
     
-    // Get current component from URL
-    const urlParams = new URLSearchParams(window.location.search);
-    const currentComponent = urlParams.get('component');
-    if (currentComponent) {
+    function loadComponent(path) {
+      if (currentlyLoading) return;
+      
       // Update active state
       document.querySelectorAll('.file-item').forEach(item => {
-        if (item.onclick.toString().includes(currentComponent)) {
-          item.classList.add('active');
+        item.classList.remove('active');
+      });
+      
+      const clickedItem = document.querySelector(\`[data-component="\${path}"]\`);
+      if (clickedItem) {
+        clickedItem.classList.add('active');
+      }
+      
+      // Update URL without reload
+      const newUrl = new URL(window.location);
+      newUrl.searchParams.set('component', path);
+      window.history.pushState({}, '', newUrl);
+      
+      // Update iframe
+      const iframe = document.querySelector('.preview-frame');
+      if (iframe) {
+        currentlyLoading = true;
+        
+        // Add loading indicator
+        const mainContent = document.querySelector('.main-content');
+        mainContent.style.opacity = '0.5';
+        mainContent.style.transition = 'opacity 0.2s';
+        
+        // Load new component
+        iframe.src = '/generated/' + path;
+        
+        iframe.onload = () => {
+          mainContent.style.opacity = '1';
+          currentlyLoading = false;
+        };
+      } else {
+        // No iframe yet, reload page
+        window.location.href = '/?component=' + encodeURIComponent(path);
+      }
+    }
+    
+    async function copyComponent(path) {
+      try {
+        // Fetch component code
+        const response = await fetch('/api/component-code?file=' + encodeURIComponent(path));
+        const data = await response.json();
+        
+        // Create WordPress-ready code
+        const wordpressCode = \`<!-- GEMS Component: \${data.elementName} -->
+<script>
+(function() {
+  if (customElements.get('\${data.elementName}')) return;
+  \${data.minified}
+})();
+</script>
+<\${data.elementName}></\${data.elementName}>
+<style>
+\${data.elementName} {
+  display: block;
+  width: 100%;
+}
+</style>\`;
+        
+        // Copy to clipboard
+        await navigator.clipboard.writeText(wordpressCode);
+        
+        // Show success state
+        const btn = document.querySelector(\`.file-item.active button.copy\`);
+        if (btn) {
+          const originalText = btn.innerHTML;
+          btn.innerHTML = '✅ Copied!';
+          btn.classList.add('success');
+          setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.classList.remove('success');
+          }, 2000);
+        }
+      } catch (error) {
+        console.error('Failed to copy:', error);
+        alert('Failed to copy component code');
+      }
+    }
+    
+    async function renameComponent(path) {
+      const newName = prompt('Enter new name for the component:', path.replace('.html', ''));
+      if (!newName || newName === path.replace('.html', '')) return;
+      
+      const newFilename = newName.endsWith('.html') ? newName : newName + '.html';
+      
+      try {
+        const response = await fetch('/api/rename', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ oldName: path, newName: newFilename })
+        });
+        
+        if (response.ok) {
+          // Reload to show updated list
+          window.location.reload();
+        } else {
+          alert('Failed to rename component');
+        }
+      } catch (error) {
+        console.error('Failed to rename:', error);
+        alert('Failed to rename component');
+      }
+    }
+    
+    function deleteComponent(path) {
+      componentToDelete = path;
+      document.getElementById('deleteComponentName').textContent = path.replace('.html', '');
+      document.getElementById('deleteModal').classList.add('show');
+    }
+    
+    function cancelDelete() {
+      document.getElementById('deleteModal').classList.remove('show');
+      componentToDelete = null;
+    }
+    
+    async function confirmDelete() {
+      if (!componentToDelete) return;
+      
+      try {
+        const response = await fetch('/api/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: componentToDelete })
+        });
+        
+        if (response.ok) {
+          // Reload to show updated list
+          window.location.href = '/';
+        } else {
+          alert('Failed to delete component');
+        }
+      } catch (error) {
+        console.error('Failed to delete:', error);
+        alert('Failed to delete component');
+      }
+      
+      cancelDelete();
+    }
+    
+    // Handle browser back/forward
+    window.addEventListener('popstate', () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const component = urlParams.get('component');
+      if (component) {
+        loadComponent(component);
+      }
+    });
+    
+    // Close modal on outside click
+    document.getElementById('deleteModal').addEventListener('click', (e) => {
+      if (e.target.id === 'deleteModal') {
+        cancelDelete();
+      }
+    });
+    
+    // Set up event delegation for file list clicks
+    document.addEventListener('DOMContentLoaded', () => {
+      const fileList = document.querySelector('.file-list');
+      
+      fileList.addEventListener('click', (e) => {
+        // Handle file content clicks
+        const fileContent = e.target.closest('.file-content');
+        if (fileContent) {
+          const path = fileContent.dataset.path;
+          if (path) loadComponent(path);
+          return;
+        }
+        
+        // Handle action button clicks
+        const button = e.target.closest('button');
+        if (button && button.dataset.path) {
+          const path = button.dataset.path;
+          
+          if (button.classList.contains('copy')) {
+            copyComponent(path);
+          } else if (button.classList.contains('rename')) {
+            renameComponent(path);
+          } else if (button.classList.contains('delete')) {
+            deleteComponent(path);
+          }
         }
       });
-    }
+    });
   </script>
 </body>
 </html>
@@ -424,57 +845,20 @@ export class PreviewServer {
   }
   
   private cleanHtmlForPreview(html: string): string {
-    // Extract the custom element name from the stored elementName variable
-    const elementNameMatch = html.match(/const elementName = ["']([^"']+)["']/);
-    const elementName = elementNameMatch ? elementNameMatch[1] : null;
+    // For the preview iframe, we want to show the full generated HTML
+    // but remove the GEMS header and toolbar to avoid duplication
+    // since those are already in the preview server's main interface
     
-    // Find the component tag - look for custom element pattern
-    let componentTag = '';
-    if (elementName) {
-      const componentRegex = new RegExp(`<${elementName}[^>]*>(?:.*?)<\/${elementName}>`, 's');
-      const match = html.match(componentRegex);
-      componentTag = match ? match[0] : `<${elementName}></${elementName}>`;
-    } else {
-      // Fallback: try to find any custom element
-      const customElementMatch = html.match(/<([a-z]+-[a-z-]+)(?:[^>]*)>(?:.*?)<\/\1>/);
-      componentTag = customElementMatch ? customElementMatch[0] : '';
-    }
+    // Remove the GEMS header
+    html = html.replace(/<header class="gems-header">[\s\S]*?<\/header>/g, '');
     
-    // Extract the JS file path
-    const scriptMatch = html.match(/<script src="([^"]+\.js)"><\/script>/);
-    const scriptSrc = scriptMatch ? scriptMatch[1] : '';
+    // Remove the GEMS toolbar
+    html = html.replace(/<div class="gems-toolbar">[\s\S]*?<\/div>\s*<script>[\s\S]*?<\/script>/g, '');
     
-    // Create a minimal preview HTML
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Component Preview</title>
-  <style>
-    body {
-      margin: 0;
-      padding: 20px;
-      font-family: system-ui, -apple-system, sans-serif;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #ffffff;
-    }
+    // Adjust padding since we removed header/toolbar
+    html = html.replace('padding-top: 80px;', 'padding-top: 20px;');
+    html = html.replace('padding-bottom: 100px;', 'padding-bottom: 20px;');
     
-    /* Ensure component is visible and centered */
-    body > * {
-      width: 100%;
-      max-width: 1200px;
-      margin: 0 auto;
-    }
-  </style>
-</head>
-<body>
-  ${scriptSrc ? `<script src="${scriptSrc}"></script>` : ''}
-  ${componentTag || '<p>Component could not be loaded</p>'}
-</body>
-</html>`;
+    return html;
   }
 }
