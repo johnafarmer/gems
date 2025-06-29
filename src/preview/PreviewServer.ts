@@ -144,11 +144,31 @@ export class PreviewServer {
               const generatedDir = join(process.cwd(), 'generated');
               const allFiles = readdirSync(generatedDir).filter(f => f.endsWith('.html'));
               const versions = this.getGemVersions(parsed.gemId, allFiles);
-              const nextVersion = versions.length + 1;
+              
+              // Determine the source file and next version number
+              let sourceFile: string;
+              let nextVersion: number;
+              
+              if (versions.length === 0) {
+                // No versions exist yet, use the original file
+                sourceFile = `${parsed.gemId}.html`;
+                nextVersion = 2; // First shard is v2
+              } else {
+                // Use the most recent version
+                sourceFile = versions[versions.length - 1];
+                const lastVersion = this.parseGemFilename(sourceFile).version;
+                nextVersion = lastVersion + 1;
+              }
               
               // Read the original component code
-              const originalHtmlPath = join(generatedDir, versions[versions.length - 1]);
+              const originalHtmlPath = join(generatedDir, sourceFile);
               const originalJsPath = originalHtmlPath.replace('.html', '.js');
+              
+              // Check if files exist
+              if (!existsSync(originalHtmlPath) || !existsSync(originalJsPath)) {
+                throw new Error(`Source files not found for ${parsed.gemId}`);
+              }
+              
               const originalJs = readFileSync(originalJsPath, 'utf-8');
               
               // Create AI prompt for modification
@@ -801,62 +821,54 @@ export class PreviewServer {
       display: block;
     }
     
-    /* Version navigation */
-    .version-nav {
-      position: fixed;
-      bottom: 2rem;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.9);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 12px;
-      padding: 0.75rem 1.5rem;
-      display: none;
-      align-items: center;
-      gap: 1rem;
-      backdrop-filter: blur(10px);
-      z-index: 50;
-    }
-    
-    .version-nav.visible {
+    /* Version links styles */
+    .version-links {
+      margin-top: 0.75rem;
       display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
     }
     
-    .version-dots {
-      display: flex;
-      gap: 0.5rem;
-      align-items: center;
-    }
-    
-    .version-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.3);
+    .version-link {
+      font-size: 0.75rem;
+      color: rgba(147, 51, 234, 0.9);
       cursor: pointer;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      background: rgba(147, 51, 234, 0.1);
       transition: all 0.2s ease;
-      position: relative;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
     
-    .version-dot:hover {
-      background: rgba(255, 255, 255, 0.5);
-      transform: scale(1.2);
+    .version-link:hover {
+      background: rgba(147, 51, 234, 0.2);
+      color: #a855f7;
+      transform: translateX(4px);
     }
     
-    .version-dot.active {
-      background: #9333ea;
-      transform: scale(1.3);
+    .version-link.active {
+      background: rgba(147, 51, 234, 0.3);
+      color: #c084fc;
+      font-weight: 700;
     }
     
-    .version-dot::after {
-      content: attr(data-version);
-      position: absolute;
-      bottom: -20px;
-      left: 50%;
-      transform: translateX(-50%);
+    .version-expand-toggle {
       font-size: 0.7rem;
-      color: rgba(255, 255, 255, 0.7);
-      white-space: nowrap;
+      color: rgba(255, 255, 255, 0.5);
+      cursor: pointer;
+      margin-top: 0.5rem;
+      display: inline-block;
+      transition: all 0.2s ease;
+    }
+    
+    .version-expand-toggle:hover {
+      color: rgba(255, 255, 255, 0.8);
+    }
+    
+    .version-links.collapsed .version-link:nth-child(n+4) {
+      display: none;
     }
   </style>
 </head>
@@ -884,6 +896,23 @@ export class PreviewServer {
               <button class="rename" data-path="${file.path}">✏️</button>
               <button class="delete" data-path="${file.path}">🗑️</button>
             </div>
+            ${file.hasVersions ? `
+              <div class="version-links ${file.versionCount > 4 ? 'collapsed' : ''}" id="versions-${file.name}">
+                ${file.allVersions.slice(0, file.versionCount).map((version, vIndex) => `
+                  <div class="version-link ${version.path === selectedComponent ? 'active' : ''}" 
+                       data-path="${version.path}"
+                       onclick="selectVersion('${version.path}')">
+                    <span>SHARD ${version.version}</span>
+                    <span style="opacity: 0.6; font-size: 0.65rem;">${new Date(parseInt(version.path.match(/-(\d+)/)[1])).toLocaleTimeString()}</span>
+                  </div>
+                `).join('')}
+                ${file.versionCount > 4 ? `
+                  <span class="version-expand-toggle" onclick="toggleVersions('${file.name}')">
+                    ${file.versionCount > 4 ? `Show ${file.versionCount - 3} more...` : ''}
+                  </span>
+                ` : ''}
+              </div>
+            ` : ''}
           </div>
         `).join('') : `
           <div class="empty-state">
@@ -913,9 +942,22 @@ export class PreviewServer {
   
   <!-- Delete confirmation modal -->
   <div class="modal" id="deleteModal">
-    <div class="modal-content">
+    <div class="modal-content" style="max-width: 500px;">
       <h3 style="margin-top: 0;">⚠️ Delete Component?</h3>
       <p>Are you sure you want to delete <strong id="deleteComponentName"></strong>?</p>
+      <div id="deleteOptions" style="display: none; margin: 1rem 0;">
+        <p style="font-size: 0.875rem; opacity: 0.8;">This component has multiple versions. What would you like to delete?</p>
+        <div style="display: flex; flex-direction: column; gap: 0.5rem; margin: 1rem 0;">
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+            <input type="radio" name="deleteOption" value="shard" checked>
+            <span>Delete only this version</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+            <input type="radio" name="deleteOption" value="all">
+            <span>Delete entire component (all versions)</span>
+          </label>
+        </div>
+      </div>
       <p style="font-size: 0.875rem; opacity: 0.7;">This action cannot be undone!</p>
       <div class="modal-buttons">
         <button onclick="cancelDelete()">Cancel</button>
@@ -965,17 +1007,57 @@ export class PreviewServer {
     💎 New SHARD
   </button>
   
-  <!-- Version navigation -->
-  <div class="version-nav" id="versionNav">
-    <div class="version-dots" id="versionDots">
-      <!-- Dots will be populated by JavaScript -->
-    </div>
-  </div>
   
   <script>
     // Define functions in global scope first
     let currentlyLoading = false;
     let componentToDelete = null;
+    
+    function toggleVersions(gemId) {
+      const versionContainer = document.getElementById('versions-' + gemId);
+      const toggle = versionContainer.querySelector('.version-expand-toggle');
+      
+      if (versionContainer.classList.contains('collapsed')) {
+        versionContainer.classList.remove('collapsed');
+        toggle.textContent = 'Show less...';
+      } else {
+        versionContainer.classList.add('collapsed');
+        const totalVersions = versionContainer.querySelectorAll('.version-link').length;
+        toggle.textContent = \`Show \${totalVersions - 3} more...\`;
+      }
+    }
+    
+    function selectVersion(path) {
+      console.log('selectVersion called with path:', path);
+      
+      // First, find which file-item contains this version
+      let targetFileItem = null;
+      document.querySelectorAll('.file-item').forEach(item => {
+        const versionLink = item.querySelector(\`.version-link[data-path="\${path}"]\`);
+        if (versionLink) {
+          targetFileItem = item;
+        }
+      });
+      
+      if (targetFileItem) {
+        // Remove active from all items
+        document.querySelectorAll('.file-item').forEach(item => {
+          item.classList.remove('active');
+        });
+        
+        // Make this item active
+        targetFileItem.classList.add('active');
+        
+        // Update all buttons in this item to use the selected version path
+        const buttons = targetFileItem.querySelectorAll('.file-actions button');
+        buttons.forEach(btn => {
+          btn.dataset.path = path;
+        });
+      }
+      
+      // Now load the component
+      loadComponent(path);
+    }
     
     function loadComponent(path) {
       console.log('loadComponent called with path:', path);
@@ -984,14 +1066,31 @@ export class PreviewServer {
         return;
       }
       
-      // Update active state
-      document.querySelectorAll('.file-item').forEach(item => {
-        item.classList.remove('active');
-      });
+      // Update active state - look for file item by data-component or containing version link
+      let clickedItem = document.querySelector(\`[data-component="\${path}"]\`);
       
-      const clickedItem = document.querySelector(\`[data-component="\${path}"]\`);
-      if (clickedItem) {
+      // If no exact match, look for item containing this version
+      if (!clickedItem) {
+        document.querySelectorAll('.file-item').forEach(item => {
+          const versionLink = item.querySelector(\`.version-link[data-path="\${path}"]\`);
+          if (versionLink) {
+            clickedItem = item;
+          }
+        });
+      }
+      
+      // Only update active state if not already handled by selectVersion
+      if (clickedItem && !clickedItem.classList.contains('active')) {
+        document.querySelectorAll('.file-item').forEach(item => {
+          item.classList.remove('active');
+        });
         clickedItem.classList.add('active');
+        
+        // Also update button paths when setting active
+        const buttons = clickedItem.querySelectorAll('.file-actions button');
+        buttons.forEach(btn => {
+          btn.dataset.path = path;
+        });
       }
       
       // Show/hide New SHARD button
@@ -1015,54 +1114,13 @@ export class PreviewServer {
         }
       }
       
-      // Get gem ID and fetch all versions
-      const nameMatch = path.match(/^(.+?)(?:-v\d+)?\.html$/);
-      console.log('Checking versions for path:', path, 'nameMatch:', nameMatch);
-      if (nameMatch) {
-        const gemId = nameMatch[1];
-        console.log('Fetching versions for gemId:', gemId);
-        
-        fetch('/api/gem-versions?gemId=' + encodeURIComponent(gemId))
-          .then(res => res.json())
-          .then(data => {
-            const versions = data.versions || [];
-            console.log('Found versions:', versions);
-            const versionNav = document.getElementById('versionNav');
-            const versionDots = document.getElementById('versionDots');
-            
-            if (versions.length > 1 && versionNav && versionDots) {
-              console.log('Showing version nav with', versions.length, 'versions');
-              // Clear existing dots
-              versionDots.innerHTML = '';
-              
-              // Create dots for each version
-              versions.forEach((versionFile, index) => {
-                const vMatch = versionFile.match(/-v(\d+)\.html$/);
-                const versionNum = vMatch ? parseInt(vMatch[1]) : 1;
-                const dot = document.createElement('div');
-                dot.className = 'version-dot';
-                dot.setAttribute('data-version', 'v' + versionNum);
-                dot.setAttribute('data-path', versionFile);
-                
-                if (versionFile === path) {
-                  dot.classList.add('active');
-                }
-                
-                dot.onclick = () => {
-                  loadComponent(versionFile);
-                };
-                
-                versionDots.appendChild(dot);
-              });
-              
-              versionNav.classList.add('visible');
-            } else if (versionNav) {
-              versionNav.classList.remove('visible');
-            }
-          })
-          .catch(err => {
-            console.error('Failed to fetch versions:', err);
-          });
+      // Update active version link in sidebar
+      document.querySelectorAll('.version-link').forEach(link => {
+        link.classList.remove('active');
+      });
+      const activeVersionLink = document.querySelector(\`.version-link[onclick="loadComponent('\${path}')"]\`);
+      if (activeVersionLink) {
+        activeVersionLink.classList.add('active');
       }
       
       
@@ -1180,8 +1238,50 @@ export class PreviewServer {
     }
     
     function deleteComponent(path) {
+      console.log('deleteComponent called with path:', path);
       componentToDelete = path;
-      document.getElementById('deleteComponentName').textContent = path.replace('.html', '');
+      const componentName = path.replace('.html', '');
+      document.getElementById('deleteComponentName').textContent = componentName;
+      
+      // Check if this component has multiple versions
+      const deleteOptions = document.getElementById('deleteOptions');
+      
+      // Extract gem ID from the path
+      const match = path.match(/^(.+?-\d+)(?:-v\d+)?\.html$/);
+      if (match) {
+        const gemId = match[1];
+        console.log('Checking versions for gemId:', gemId);
+        
+        // Always check for versions to show options
+        fetch('/api/gem-versions?gemId=' + encodeURIComponent(gemId))
+          .then(res => res.json())
+          .then(data => {
+            console.log('Versions found:', data.versions);
+            if (data.versions && data.versions.length > 1) {
+              // Show delete options
+              deleteOptions.style.display = 'block';
+              
+              // Set appropriate default based on what's selected
+              if (path.includes('-v')) {
+                // Selecting a specific version, default to deleting just this shard
+                document.querySelector('input[value="shard"]').checked = true;
+              } else {
+                // Selecting the base version, default to deleting all
+                document.querySelector('input[value="all"]').checked = true;
+              }
+            } else {
+              // Only one version exists
+              deleteOptions.style.display = 'none';
+            }
+          })
+          .catch(err => {
+            console.error('Failed to check versions:', err);
+            deleteOptions.style.display = 'none';
+          });
+      } else {
+        // Couldn't parse gem ID
+        deleteOptions.style.display = 'none';
+      }
       document.getElementById('deleteModal').classList.add('show');
     }
     
@@ -1193,19 +1293,42 @@ export class PreviewServer {
     async function confirmDelete() {
       if (!componentToDelete) return;
       
+      const deleteOption = document.querySelector('input[name="deleteOption"]:checked')?.value || 'single';
+      
       try {
-        const response = await fetch('/api/delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: componentToDelete })
-        });
-        
-        if (response.ok) {
-          // Reload to show updated list
-          window.location.href = '/';
+        if (deleteOption === 'all') {
+          // Delete all versions of the gem
+          const match = componentToDelete.match(/^(.+?-\d+)(?:-v\d+)?\.html$/);
+          if (match) {
+            const gemId = match[1];
+            // Get all versions
+            const versionsRes = await fetch('/api/gem-versions?gemId=' + encodeURIComponent(gemId));
+            const versionsData = await versionsRes.json();
+            
+            // Delete each version
+            for (const versionFile of versionsData.versions) {
+              await fetch('/api/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: versionFile })
+              });
+            }
+          }
         } else {
-          alert('Failed to delete component');
+          // Delete single file
+          const response = await fetch('/api/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: componentToDelete })
+          });
+          
+          if (!response.ok) {
+            throw new Error('Failed to delete');
+          }
         }
+        
+        // Reload to show updated list
+        window.location.href = '/';
       } catch (error) {
         console.error('Failed to delete:', error);
         alert('Failed to delete component');
