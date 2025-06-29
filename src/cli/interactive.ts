@@ -11,6 +11,8 @@ export async function interactiveMode(): Promise<void> {
   console.log(chalk.gray('\n✨ Welcome to GEMS Interactive Mode ✨\n'));
   
   let shouldExit = false;
+  let previewServerRunning = false;
+  let previewServerUrl = '';
   
   while (!shouldExit) {
     const { action } = await prompts({
@@ -24,9 +26,9 @@ export async function interactiveMode(): Promise<void> {
           description: 'Generate a new AI-powered component'
         },
         {
-          title: '🌐 Start GEMS Browser',
+          title: previewServerRunning ? '🌐 Open GEMS Browser' : '🌐 Start GEMS Browser',
           value: 'preview',
-          description: 'Start the GEMS browser and open the interface'
+          description: previewServerRunning ? 'Open the GEMS browser in your default browser' : 'Start the GEMS browser and open the interface'
         },
         {
           title: '⚙️  Configuration',
@@ -71,8 +73,41 @@ export async function interactiveMode(): Promise<void> {
         break;
         
       case 'preview':
-        // Run preview command interactively
-        await previewCommand.parseAsync(['', '', '']);
+        if (previewServerRunning && previewServerUrl) {
+          // Server already running, just open the browser
+          const open = (await import('open')).default;
+          await open(previewServerUrl);
+          console.log(chalk.green(`\n✅ Opened GEMS Browser at ${previewServerUrl}`));
+        } else {
+          // Start the preview server
+          try {
+            // Import PreviewServer directly to track state
+            const { PreviewServer } = await import('../preview/PreviewServer.js');
+            const ora = (await import('ora')).default;
+            const open = (await import('open')).default;
+            
+            const spinner = ora(chalk.cyan('Starting preview server...')).start();
+            
+            const server = new PreviewServer();
+            const url = await server.start({
+              port: 3000,
+              component: undefined
+            });
+            
+            spinner.succeed(chalk.green('Preview server running!'));
+            
+            previewServerRunning = true;
+            previewServerUrl = url;
+            
+            console.log(chalk.cyan(`\n🌐 Preview available at: ${chalk.white(url)}`));
+            console.log(chalk.gray('\nThe server will continue running in the background'));
+            
+            await open(url);
+          } catch (error) {
+            console.error(chalk.red('\n✖ Failed to start preview server'));
+            console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+          }
+        }
         break;
         
       case 'config':

@@ -12,12 +12,13 @@ export const previewCommand = new Command('preview')
   .option('-p, --port <port>', 'Port to run preview server', '3000')
   .option('-c, --component <name>', 'Specific component to preview')
   .option('--no-open', 'Don\'t open browser automatically')
+  .option('--skip-selection', 'Skip component selection and show browser')
   .action(async (options) => {
     const spinner = ora();
     
     try {
-      // If no component specified, show file browser
-      if (!options.component) {
+      // If no component specified and not skipping selection, show file browser
+      if (!options.component && !options.skipSelection) {
         const generatedDir = join(process.cwd(), 'generated');
         
         try {

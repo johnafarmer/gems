@@ -7,6 +7,7 @@ import { featuresTemplate } from '../templates/features.template.js';
 import { testimonialTemplate } from '../templates/testimonial.template.js';
 import { pricingTemplate } from '../templates/pricing.template.js';
 import { faqTemplate } from '../templates/faq.template.js';
+import { ComponentValidator } from '../validators/ComponentValidator.js';
 
 export interface GenerateComponentOptions {
   type: string;
@@ -43,52 +44,129 @@ const TEMPLATES: Record<string, any> = {
 };
 
 export class ComponentGenerator {
-  constructor(private aiService: AIService) {}
+  private validator: ComponentValidator;
+  
+  constructor(private aiService: AIService) {
+    this.validator = new ComponentValidator();
+  }
 
   async generate(options: GenerateComponentOptions): Promise<GeneratedComponent> {
-    const prompt = this.buildPrompt(options);
-    const result = await this.aiService.generateWithSource({ prompt, model: options.model as any });
-    
-    // Parse the response and extract component code
-    const componentCode = this.parseComponentCode(result.content);
-    
-    // Store the source info for later use
-    (this as any).lastSource = result.source;
-    
-    // Ensure output directory exists in current working directory
-    const outputDir = join(process.cwd(), 'generated');
-    if (!existsSync(outputDir)) {
-      mkdirSync(outputDir, { recursive: true });
+    try {
+      const prompt = this.buildPrompt(options);
+      const result = await this.aiService.generateWithSource({ prompt, model: options.model as any });
+      
+      // Parse the response and extract component code
+      const componentCode = this.parseComponentCode(result.content);
+      
+      // Store the source info for later use
+      (this as any).lastSource = result.source;
+      
+      // Validate the extracted JavaScript code
+      let finalJsCode = componentCode.javascript || this.getDefaultComponent(options);
+      const validation = this.validator.validate(finalJsCode);
+      
+      if (!validation.isValid) {
+        console.log('🔧 Component validation failed, attempting auto-fix...');
+        
+        // Try to auto-fix common issues
+        const fixResult = this.validator.attemptAutoFix(finalJsCode);
+        if (fixResult.fixed) {
+          console.log('✨ Applied fixes:', fixResult.changes.join(', '));
+          finalJsCode = fixResult.code;
+          
+          // Re-validate after fixes
+          const revalidation = this.validator.validate(finalJsCode);
+          if (!revalidation.isValid) {
+            // If still invalid, create an error component
+            console.error('❌ Component generation failed:', revalidation.errors);
+            finalJsCode = this.createErrorComponent(options, revalidation.errors);
+          }
+        } else {
+          // Create error component if we can't fix it
+          console.error('❌ Component generation failed:', validation.errors);
+          finalJsCode = this.createErrorComponent(options, validation.errors);
+        }
+      }
+      
+      // Show warnings if any
+      if (validation.warnings && validation.warnings.length > 0) {
+        console.log('⚠️  Warnings:', validation.warnings.join(', '));
+      }
+      
+      // Ensure output directory exists in current working directory
+      const outputDir = join(process.cwd(), 'generated');
+      if (!existsSync(outputDir)) {
+        mkdirSync(outputDir, { recursive: true });
+      }
+      
+      // Generate file paths and content
+      const timestamp = Date.now();
+      const componentName = `${options.type}-${timestamp}`;
+      const files = [
+        {
+          path: join(outputDir, `${componentName}.js`),
+          content: finalJsCode
+        },
+        {
+          path: join(outputDir, `${componentName}.html`),
+          content: componentCode.html || this.getUsageExample(componentName, finalJsCode, options)
+        }
+      ];
+      
+      // Write files to disk
+      files.forEach(file => {
+        writeFileSync(file.path, file.content);
+      });
+      
+      return {
+        files,
+        metadata: {
+          type: options.type,
+          brand: options.brand,
+          style: options.style,
+          created: new Date()
+        }
+      };
+    } catch (error) {
+      console.error('💥 Unexpected error during component generation:', error);
+      
+      // Create a fallback error component
+      const errorComponent = this.createErrorComponent(options, [
+        error instanceof Error ? error.message : 'Unknown error occurred'
+      ]);
+      
+      const outputDir = join(process.cwd(), 'generated');
+      if (!existsSync(outputDir)) {
+        mkdirSync(outputDir, { recursive: true });
+      }
+      
+      const timestamp = Date.now();
+      const componentName = `${options.type}-${timestamp}`;
+      const files = [
+        {
+          path: join(outputDir, `${componentName}.js`),
+          content: errorComponent
+        },
+        {
+          path: join(outputDir, `${componentName}.html`),
+          content: this.getUsageExample(componentName, errorComponent, options)
+        }
+      ];
+      
+      files.forEach(file => {
+        writeFileSync(file.path, file.content);
+      });
+      
+      return {
+        files,
+        metadata: {
+          type: options.type,
+          brand: options.brand,
+          style: options.style,
+          created: new Date()
+        }
+      };
     }
-    
-    // Generate file paths and content
-    const timestamp = Date.now();
-    const componentName = `${options.type}-${timestamp}`;
-    const files = [
-      {
-        path: join(outputDir, `${componentName}.js`),
-        content: componentCode.javascript || this.getDefaultComponent(options)
-      },
-      {
-        path: join(outputDir, `${componentName}.html`),
-        content: componentCode.html || this.getUsageExample(componentName, componentCode.javascript || '', options)
-      }
-    ];
-    
-    // Write files to disk
-    files.forEach(file => {
-      writeFileSync(file.path, file.content);
-    });
-    
-    return {
-      files,
-      metadata: {
-        type: options.type,
-        brand: options.brand,
-        style: options.style,
-        created: new Date()
-      }
-    };
   }
 
   private buildPrompt(options: GenerateComponentOptions): string {
@@ -119,7 +197,7 @@ export class ComponentGenerator {
         prompt += `- Visual style: ${options.style}\n`;
       }
       
-      prompt += '\nReturn ONLY the JavaScript web component code in a code block.';
+      prompt += '\n\nIMPORTANT: Return ONLY the JavaScript code for the web component. Do not include any explanations, descriptions, or text before or after the code. The response should start with "class" and end with "customElements.define". Output the code in a JavaScript code block using ```javascript```.';
       
       return prompt;
     }
@@ -135,21 +213,23 @@ export class ComponentGenerator {
   }
   
   private parseComponentCode(response: string): { javascript?: string; html?: string } {
-    // Try multiple code block formats
-    const codeBlockRegex = /```(?:javascript|js|html)?\s*([\s\S]*?)```/g;
+    // First, try to extract code from markdown code blocks
+    const codeBlockRegex = /```(?:javascript|js|jsx|typescript|ts)?\s*([\s\S]*?)```/g;
     const matches = [...response.matchAll(codeBlockRegex)];
     
     if (matches.length > 0) {
-      // If we have code blocks, extract the first one as the main component
-      const mainCode = matches[0][1].trim();
+      // Get the first JavaScript code block
+      let mainCode = matches[0][1].trim();
+      
+      // Clean up common AI response artifacts
+      mainCode = this.cleanupAIResponse(mainCode);
       
       // Check if it's HTML with embedded script
       if (mainCode.includes('<script>') && mainCode.includes('</script>')) {
-        // Extract the script content
         const scriptMatch = mainCode.match(/<script>([\s\S]*?)<\/script>/);
         if (scriptMatch) {
           return {
-            javascript: scriptMatch[1].trim(),
+            javascript: this.cleanupAIResponse(scriptMatch[1].trim()),
             html: this.extractUsageExample(mainCode)
           };
         }
@@ -161,11 +241,56 @@ export class ComponentGenerator {
       };
     }
     
-    // If no code blocks, return the whole response
+    // If no code blocks, try to extract component pattern directly
+    // Look for class definition extending HTMLElement
+    const classMatch = response.match(/class\s+\w+\s+extends\s+HTMLElement[\s\S]*?customElements\.define\([^)]+\);?/);
+    if (classMatch) {
+      return {
+        javascript: this.cleanupAIResponse(classMatch[0]),
+        html: undefined
+      };
+    }
+    
+    // Last resort - clean up the entire response and hope it's valid code
+    const cleaned = this.cleanupAIResponse(response);
     return {
-      javascript: response,
+      javascript: cleaned,
       html: undefined
     };
+  }
+  
+  private cleanupAIResponse(code: string): string {
+    // Remove common AI explanatory text patterns
+    let cleaned = code;
+    
+    // Remove leading explanatory text before class definition
+    const classStart = cleaned.match(/class\s+\w+\s+extends\s+HTMLElement/);
+    if (classStart && classStart.index && classStart.index > 0) {
+      // Check if there's non-code content before the class
+      const beforeClass = cleaned.substring(0, classStart.index);
+      if (!/^[\s\n]*$/.test(beforeClass) && !beforeClass.includes('import')) {
+        cleaned = cleaned.substring(classStart.index);
+      }
+    }
+    
+    // Remove trailing explanatory text after customElements.define
+    const defineMatch = cleaned.match(/customElements\.define\([^)]+\);?/);
+    if (defineMatch && defineMatch.index !== undefined) {
+      const endIndex = defineMatch.index + defineMatch[0].length;
+      const afterDefine = cleaned.substring(endIndex);
+      // If there's content after that doesn't look like code, remove it
+      if (afterDefine && !/^\s*[\n\r]*$/.test(afterDefine) && !afterDefine.trim().startsWith('//')) {
+        cleaned = cleaned.substring(0, endIndex);
+      }
+    }
+    
+    // Remove markdown artifacts that might have been included
+    cleaned = cleaned.replace(/^```[\w]*\n?/, '').replace(/\n?```$/, '');
+    
+    // Remove "Here's the code:" type prefixes
+    cleaned = cleaned.replace(/^(?:Here'?s?\s+(?:the|your)\s+(?:code|component)|The\s+(?:code|component)\s+is)[:\s]*/i, '');
+    
+    return cleaned.trim();
   }
   
   private extractUsageExample(htmlCode: string): string {
@@ -496,5 +621,128 @@ customElements.define('${options.type}-component', ${this.toPascalCase(options.t
   
   private capitalizeFirst(str: string): string {
     return str.charAt(0).toUpperCase() + str.slice(1);
+  }
+  
+  private createErrorComponent(options: GenerateComponentOptions, errors: string[]): string {
+    const elementName = `${options.type}-error`;
+    const className = this.toPascalCase(options.type) + 'Error';
+    
+    return `
+class ${className} extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+  }
+  
+  connectedCallback() {
+    this.shadowRoot.innerHTML = \`
+      <style>
+        :host {
+          display: block;
+          padding: 2rem;
+          background: rgba(239, 68, 68, 0.1);
+          border: 2px solid rgba(239, 68, 68, 0.3);
+          border-radius: 12px;
+          font-family: system-ui, -apple-system, sans-serif;
+          margin: 1rem 0;
+        }
+        
+        .error-container {
+          color: #dc2626;
+        }
+        
+        h2 {
+          margin: 0 0 1rem 0;
+          font-size: 1.5rem;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+        
+        .error-icon {
+          font-size: 1.75rem;
+        }
+        
+        .error-message {
+          background: white;
+          padding: 1rem;
+          border-radius: 8px;
+          margin-bottom: 1rem;
+          border-left: 4px solid #dc2626;
+        }
+        
+        .error-details {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+        }
+        
+        .error-details li {
+          padding: 0.5rem 0;
+          border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+        }
+        
+        .error-details li:last-child {
+          border-bottom: none;
+        }
+        
+        .help-text {
+          margin-top: 1rem;
+          padding: 1rem;
+          background: rgba(59, 130, 246, 0.1);
+          border-radius: 8px;
+          color: #1e40af;
+          font-size: 0.875rem;
+        }
+        
+        code {
+          background: rgba(0, 0, 0, 0.1);
+          padding: 0.125rem 0.25rem;
+          border-radius: 4px;
+          font-family: monospace;
+        }
+      </style>
+      <div class="error-container">
+        <h2>
+          <span class="error-icon">⚠️</span>
+          Component Generation Error
+        </h2>
+        <div class="error-message">
+          <p>Failed to generate a valid ${options.type} component${options.brand ? ' for ' + options.brand : ''}.</p>
+          <ul class="error-details">
+            ${errors.map(error => `<li>❌ ${this.escapeHtml(error)}</li>`).join('')}
+          </ul>
+        </div>
+        <div class="help-text">
+          <strong>💡 Tips to resolve:</strong>
+          <ul>
+            <li>Try simplifying your component description</li>
+            <li>Ensure your prompt clearly describes a web component</li>
+            <li>Check if the AI model is responding with valid JavaScript</li>
+            <li>Try using a different model if the issue persists</li>
+          </ul>
+        </div>
+      </div>
+    \`;
+  }
+  
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+}
+
+customElements.define('${elementName}', ${className});
+`.trim();
+  }
+  
+  private escapeHtml(text: string): string {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 }

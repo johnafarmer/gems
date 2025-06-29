@@ -181,7 +181,8 @@ export class PreviewServer {
               - Maintain the same component structure and element name
               - Apply the requested modifications
               - Keep all existing functionality unless specifically asked to change
-              - Return only the modified JavaScript code`;
+              
+              CRITICAL: Return ONLY the modified JavaScript code. Do not include any explanations, descriptions, or text before or after the code. The response should start with "class" and end with "customElements.define". Output the code in a JavaScript code block using \`\`\`javascript\`\`\`.`;
               
               // Use AI service to generate modified version
               const { ConfigManager } = await import('../config/ConfigManager.js');
@@ -197,9 +198,48 @@ export class PreviewServer {
               
               const modifiedCode = result.content;
               
-              // Extract just the JavaScript code from the response
+              // Extract and clean the JavaScript code
+              let cleanCode: string;
               const codeMatch = modifiedCode.match(/```(?:javascript|js)?\n([\s\S]*?)\n```/);
-              const cleanCode = codeMatch ? codeMatch[1] : modifiedCode;
+              
+              if (codeMatch) {
+                cleanCode = codeMatch[1];
+              } else {
+                // Try to extract component pattern directly
+                const classMatch = modifiedCode.match(/class\s+\w+\s+extends\s+HTMLElement[\s\S]*?customElements\.define\([^)]+\);?/);
+                cleanCode = classMatch ? classMatch[0] : modifiedCode;
+              }
+              
+              // Clean up AI response artifacts
+              cleanCode = cleanCode
+                .replace(/^```[\w]*\n?/, '')
+                .replace(/\n?```$/, '')
+                .replace(/^(?:Here'?s?\s+(?:the|your)\s+(?:code|component|modified version)|The\s+(?:code|component|modified version)\s+is)[:\s]*/i, '')
+                .trim();
+              
+              // Validate the modified code
+              const { ComponentValidator } = await import('../validators/ComponentValidator.js');
+              const validator = new ComponentValidator();
+              const validation = validator.validate(cleanCode);
+              
+              if (!validation.isValid) {
+                console.log('🔧 Shard validation failed, attempting auto-fix...');
+                
+                // Try to auto-fix
+                const fixResult = validator.attemptAutoFix(cleanCode);
+                if (fixResult.fixed) {
+                  console.log('✨ Applied fixes:', fixResult.changes.join(', '));
+                  cleanCode = fixResult.code;
+                  
+                  // Re-validate
+                  const revalidation = validator.validate(cleanCode);
+                  if (!revalidation.isValid) {
+                    throw new Error(`Shard generation failed: ${revalidation.errors.join('; ')}`);
+                  }
+                } else {
+                  throw new Error(`Shard generation failed: ${validation.errors.join('; ')}`);
+                }
+              }
               
               // Create new filenames with version
               const newHtmlName = `${parsed.gemId}-v${nextVersion}.html`;
@@ -262,7 +302,7 @@ export class PreviewServer {
               const generator = new ComponentGenerator(aiService);
               
               const result = await generator.generate({
-                type: type === 'custom' ? undefined : type,
+                type: type === 'custom' ? 'component' : type,
                 description
               });
               
@@ -1090,7 +1130,7 @@ export class PreviewServer {
             </div>
             ${file.hasVersions ? `
               <div class="version-links ${file.versionCount > 4 ? 'collapsed' : ''}" id="versions-${file.name}">
-                ${file.allVersions.slice(0, file.versionCount).map((version, vIndex) => `
+                ${file.allVersions.slice(0, file.versionCount).map((version: any) => `
                   <div class="version-link ${version.path === selectedComponent ? 'active' : ''}" 
                        data-path="${version.path}"
                        onclick="selectVersion('${version.path}')">
@@ -1125,9 +1165,77 @@ export class PreviewServer {
         </div>
         <iframe class="preview-frame" src="/generated/${selectedComponent}"></iframe>
       ` : `
-        <div style="display: flex; align-items: center; justify-content: center; height: 100%; opacity: 0.5;">
-          <p>Select a component to preview</p>
+        <div class="splash-screen" style="display: flex; align-items: center; justify-content: center; height: 100%; 
+             background: radial-gradient(circle at center, rgba(147, 51, 234, 0.1) 0%, transparent 50%);">
+          <div style="text-align: center; max-width: 600px; padding: 2rem;">
+            <div style="font-size: 6rem; margin-bottom: 2rem; animation: pulse 2s ease-in-out infinite;">💎</div>
+            <h1 style="font-size: 3rem; margin: 0 0 1rem 0; background: linear-gradient(135deg, #9333ea, #667eea, #9333ea);
+                       background-size: 200% 200%; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+                       animation: gradient 3s ease infinite;">Welcome to GEMS</h1>
+            <p style="font-size: 1.25rem; opacity: 0.8; margin-bottom: 3rem;">
+              Create beautiful, AI-powered web components for WordPress
+            </p>
+            
+            <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+              <button onclick="showCreateGemModal()" 
+                style="padding: 1rem 2rem; background: linear-gradient(135deg, rgba(147, 51, 234, 0.8), rgba(103, 126, 234, 0.8));
+                       border: 1px solid rgba(255, 255, 255, 0.2); color: white; border-radius: 12px;
+                       cursor: pointer; font-size: 1.125rem; font-weight: 600; transition: all 0.3s ease;
+                       font-family: 'OpenDyslexic', system-ui, -apple-system, sans-serif;">
+                ✨ Create New GEM
+              </button>
+              
+              <button onclick="document.querySelector('.component-item')?.click()" 
+                style="padding: 1rem 2rem; background: rgba(255, 255, 255, 0.1);
+                       border: 1px solid rgba(255, 255, 255, 0.2); color: white; border-radius: 12px;
+                       cursor: pointer; font-size: 1.125rem; font-weight: 600; transition: all 0.3s ease;
+                       font-family: 'OpenDyslexic', system-ui, -apple-system, sans-serif;">
+                📁 Browse Components
+              </button>
+            </div>
+            
+            <div style="margin-top: 4rem; padding: 2rem; background: rgba(255, 255, 255, 0.05); 
+                        border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.1);">
+              <h3 style="margin: 0 0 1rem 0; opacity: 0.9;">✨ Quick Tips</h3>
+              <ul style="text-align: left; list-style: none; padding: 0; margin: 0; opacity: 0.8;">
+                <li style="margin-bottom: 0.75rem;">
+                  <span style="margin-right: 0.5rem;">💎</span>
+                  Click on any component in the sidebar to preview it
+                </li>
+                <li style="margin-bottom: 0.75rem;">
+                  <span style="margin-right: 0.5rem;">🔮</span>
+                  Create SHARDs to modify existing components with AI
+                </li>
+                <li style="margin-bottom: 0.75rem;">
+                  <span style="margin-right: 0.5rem;">📋</span>
+                  Copy components directly to Elementor or WordPress
+                </li>
+                <li>
+                  <span style="margin-right: 0.5rem;">⚙️</span>
+                  Configure AI models and preferences in Settings
+                </li>
+              </ul>
+            </div>
+          </div>
         </div>
+        
+        <style>
+          @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.1); opacity: 1; }
+          }
+          
+          @keyframes gradient {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+          }
+          
+          .splash-screen button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(147, 51, 234, 0.3);
+          }
+        </style>
       `}
     </main>
   </div>
