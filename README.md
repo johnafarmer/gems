@@ -4,19 +4,24 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue?style=flat&logo=typescript)](https://www.typescriptlang.org/)
 [![Powered by AI](https://img.shields.io/badge/Powered%20by-AI-blueviolet?style=flat)](https://openrouter.ai)
 
-GEMS is a blazing-fast CLI tool for rapid prototyping of web components for WordPress websites. Generate beautiful, accessible components through natural language prompts, voice commands, or even screenshots - all with a local-first approach that respects your privacy and works offline.
+GEMS is a blazing-fast CLI tool for rapid prototyping of web components for WordPress websites. Generate beautiful, accessible components through natural language prompts - all with a local-first approach that respects your privacy and works offline.
 
 ## ✨ Features
 
+### Available Now
 - **🎯 Natural Language Generation** - Describe what you want, get production-ready components
-- **🎤 Voice Input** - Speak your ideas into existence with local Whisper WASM
-- **📸 Screenshot to Component** - Turn any design into code instantly
 - **🏠 Local-First** - Primary AI processing via LM Studio, fallback to cloud when needed
 - **⚡ Lightning Fast** - Built with Bun for superior performance
-- **🎨 Multi-Framework** - Generate Web Components, React, Vue, or vanilla JS
 - **🔌 WordPress Ready** - Components work seamlessly with WordPress
-- **🔄 Hot Reload Preview** - See changes instantly with Vite
-- **🧪 Built-in Testing** - Visual regression testing included
+- **👁️ Live Preview** - Interactive preview server with component management
+- **💎 SHARDS** - Create and browse multiple versions of your components
+- **🎨 Interactive Mode** - User-friendly CLI with visual menus
+
+### Coming Soon
+- **🎤 Voice Input** - Speak your ideas into existence with local Whisper WASM
+- **📸 Screenshot to Component** - Turn any design into code instantly
+- **🔄 Multi-Framework Output** - Export to React, Vue, or vanilla JS
+- **🧪 Visual Regression Testing** - Built-in testing for your components
 
 ## 🚀 Quick Start
 
@@ -27,13 +32,10 @@ bun install -g gems-cli
 # Generate your first component
 gems create hero
 
-# Start with voice input
-gems create --voice
+# Start interactive mode
+gems
 
-# Convert a screenshot
-gems create --from-screenshot ./design.png
-
-# Preview your component
+# Preview your components
 gems preview
 
 # Configure AI endpoints
@@ -48,10 +50,8 @@ gems config ai
 - **AI Integration**: 
   - [LM Studio](https://lmstudio.ai) for local models
   - [OpenRouter](https://openrouter.ai) for cloud models
-- **Component Framework**: [Mitosis](https://mitosis.builder.io) for multi-framework output
-- **Preview Server**: [Vite](https://vitejs.dev) with HMR
-- **Testing**: [Vitest](https://vitest.dev) + [Playwright](https://playwright.dev)
-- **Database**: SQLite for local storage
+- **Preview Server**: Custom-built with glassmorphic UI
+- **Component Output**: Web Components (vanilla JS)
 
 ## 📋 Prerequisites
 
@@ -93,6 +93,18 @@ gems/
 └── examples/           # Example components
 ```
 
+## 💎 SHARDS - Version Your Components
+
+SHARDS let you create multiple versions of any component directly from the preview server:
+
+1. **View a component** in the preview server
+2. **Click "New SHARD"** to create a variation
+3. **Describe the changes** you want (e.g., "make it more colorful", "add animations")
+4. **Browse versions** with the version slider
+5. **Copy any version** independently
+
+Each SHARD maintains the original component's structure while applying your requested modifications.
+
 ## 🎯 Usage Examples
 
 ### Basic Component Generation
@@ -112,14 +124,11 @@ gems create "A testimonial carousel with customer photos and ratings"
 # Use local AI model
 gems create nav --model local
 
-# Generate multiple variations
-gems create cta --variations 5
+# Use cloud AI model (OpenRouter)
+gems create hero --model cloud
 
-# Export to specific framework
-gems create form --output react
-
-# Save to component library
-gems create footer --save "corporate-footer"
+# Interactive mode for easy creation
+gems
 ```
 
 ### Configuration
@@ -200,6 +209,24 @@ We love contributions! Please see our [Contributing Guide](./CONTRIBUTING.md) fo
 ## 📄 License
 
 MIT © [Your Name]
+
+## 🗺️ Roadmap
+
+### ✅ Completed
+- Natural language component generation
+- Local-first AI with LM Studio
+- Cloud AI fallback with OpenRouter
+- Interactive CLI mode
+- Live preview server
+- WordPress-ready output
+- **SHARDS versioning system** (NEW!)
+
+### 🚧 In Progress
+- Voice input support
+- Screenshot to component
+- Multi-framework output
+- Visual regression testing
+- Component marketplace
 
 ## 🙏 Acknowledgments
 

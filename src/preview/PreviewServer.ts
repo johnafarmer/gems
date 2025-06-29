@@ -1,6 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { join, extname } from 'path';
-import { readFileSync, existsSync, readdirSync, statSync, unlinkSync, renameSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, statSync, unlinkSync, renameSync, writeFileSync } from 'fs';
 
 export interface PreviewServerOptions {
   port?: number;
@@ -9,6 +9,38 @@ export interface PreviewServerOptions {
 
 export class PreviewServer {
   private server?: ReturnType<typeof createServer>;
+  
+  // Helper to parse gem filename into parts
+  private parseGemFilename(filename: string): { type: string; timestamp: string; version: number; gemId: string } {
+    // Remove .html extension
+    const name = filename.replace('.html', '');
+    
+    // Match pattern: type-timestamp or type-timestamp-v2
+    const match = name.match(/^(.+?)-(\d+)(?:-v(\d+))?$/);
+    if (!match) {
+      return { type: 'unknown', timestamp: '0', version: 1, gemId: name };
+    }
+    
+    const [, type, timestamp, versionStr] = match;
+    const version = versionStr ? parseInt(versionStr) : 1;
+    const gemId = `${type}-${timestamp}`;
+    
+    return { type, timestamp, version, gemId };
+  }
+  
+  // Get all versions of a specific gem
+  private getGemVersions(gemId: string, allFiles: string[]): string[] {
+    return allFiles
+      .filter(f => {
+        const parsed = this.parseGemFilename(f);
+        return parsed.gemId === gemId;
+      })
+      .sort((a, b) => {
+        const versionA = this.parseGemFilename(a).version;
+        const versionB = this.parseGemFilename(b).version;
+        return versionA - versionB;
+      });
+  }
   
   async start(options: PreviewServerOptions = {}): Promise<string> {
     const port = options.port || 3000;
@@ -97,6 +129,115 @@ export class PreviewServer {
               res.end(JSON.stringify({ error: 'Component not found' }));
             }
           }
+        } else if (pathname === '/api/create-shard' && req.method === 'POST') {
+          // Create a new version of a component
+          let body = '';
+          req.on('data', chunk => body += chunk);
+          req.on('end', async () => {
+            try {
+              const { gemId, prompt } = JSON.parse(body);
+              
+              // Parse the gem ID to get type and timestamp
+              const parsed = this.parseGemFilename(gemId + '.html');
+              
+              // Find all versions of this gem
+              const generatedDir = join(process.cwd(), 'generated');
+              const allFiles = readdirSync(generatedDir).filter(f => f.endsWith('.html'));
+              const versions = this.getGemVersions(parsed.gemId, allFiles);
+              const nextVersion = versions.length + 1;
+              
+              // Read the original component code
+              const originalHtmlPath = join(generatedDir, versions[versions.length - 1]);
+              const originalJsPath = originalHtmlPath.replace('.html', '.js');
+              const originalJs = readFileSync(originalJsPath, 'utf-8');
+              
+              // Create AI prompt for modification
+              const modificationPrompt = `Given this existing web component code, modify it according to this request: "${prompt}"
+              
+              Original component code:
+              ${originalJs}
+              
+              Important: 
+              - Maintain the same component structure and element name
+              - Apply the requested modifications
+              - Keep all existing functionality unless specifically asked to change
+              - Return only the modified JavaScript code`;
+              
+              // Use AI service to generate modified version
+              const { ConfigManager } = await import('../config/ConfigManager.js');
+              const { AIService } = await import('../services/ai/AIService.js');
+              const config = new ConfigManager();
+              const aiService = new AIService(config);
+              
+              const result = await aiService.generateWithSource({
+                prompt: modificationPrompt,
+                temperature: 0.7,
+                maxTokens: 4000
+              });
+              
+              const modifiedCode = result.content;
+              
+              // Extract just the JavaScript code from the response
+              const codeMatch = modifiedCode.match(/```(?:javascript|js)?\n([\s\S]*?)\n```/);
+              const cleanCode = codeMatch ? codeMatch[1] : modifiedCode;
+              
+              // Create new filenames with version
+              const newHtmlName = `${parsed.gemId}-v${nextVersion}.html`;
+              const newJsName = `${parsed.gemId}-v${nextVersion}.js`;
+              
+              // Read original HTML and update script src
+              const originalHtml = readFileSync(originalHtmlPath, 'utf-8');
+              const newHtml = originalHtml.replace(
+                /src="[^"]+\.js"/,
+                `src="${newJsName}"`
+              );
+              
+              // Write new files
+              writeFileSync(join(generatedDir, newHtmlName), newHtml);
+              writeFileSync(join(generatedDir, newJsName), cleanCode);
+              
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ 
+                success: true,
+                newFile: newHtmlName,
+                version: nextVersion,
+                modelInfo: result.source
+              }));
+            } catch (error) {
+              console.error('Create shard error:', error);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+            }
+          });
+        } else if (pathname === '/api/current-config' && req.method === 'GET') {
+          // Return current AI configuration
+          import('../config/ConfigManager.js').then(({ ConfigManager }) => {
+            const config = new ConfigManager();
+            
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              defaultModel: config.get('ai.defaultModel'),
+              cloudModel: config.get('ai.openrouter.model'),
+              localEndpoint: config.get('ai.local.endpoint')
+            }));
+          }).catch(() => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Failed to load config' }));
+          });
+        } else if (pathname === '/api/gem-versions' && req.method === 'GET') {
+          // Get all versions of a gem
+          const gemId = parsedUrl.searchParams.get('gemId');
+          if (gemId) {
+            const generatedDir = join(process.cwd(), 'generated');
+            const allFiles = readdirSync(generatedDir).filter(f => f.endsWith('.html'));
+            const versions = this.getGemVersions(gemId, allFiles);
+            
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ versions }));
+          } else {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Missing gemId parameter' }));
+          }
         } else if (pathname.startsWith('/generated/')) {
           // Serve files from generated directory
           const filePath = join(process.cwd(), pathname.slice(1));
@@ -157,15 +298,42 @@ export class PreviewServer {
     }
     
     const selectedComponent = component || (componentFiles[0]?.name);
-    const fileList = componentFiles.map(f => {
-      // Extract component type from filename (e.g., hero-1234.html -> hero)
-      const componentType = f.name.split('-')[0];
-      return {
+    
+    // Group files by GEM ID
+    const gemGroups = new Map<string, Array<{name: string, path: string, time: string, type: string, version: number}>>();
+    
+    componentFiles.forEach(f => {
+      const parsed = this.parseGemFilename(f.name);
+      const gemId = parsed.gemId;
+      
+      if (!gemGroups.has(gemId)) {
+        gemGroups.set(gemId, []);
+      }
+      
+      gemGroups.get(gemId)!.push({
         name: f.name.replace('.html', ''),
         path: f.name,
         time: f.time.toLocaleString(),
-        type: componentType
-      };
+        type: parsed.type,
+        version: parsed.version
+      });
+    });
+    
+    // Sort versions within each group
+    gemGroups.forEach(versions => {
+      versions.sort((a, b) => b.version - a.version);
+    });
+    
+    // Create flat list showing only the latest version of each GEM
+    const fileList: Array<any> = [];
+    gemGroups.forEach((versions) => {
+      const latest = versions[0];
+      fileList.push({
+        ...latest,
+        hasVersions: versions.length > 1,
+        versionCount: versions.length,
+        allVersions: versions
+      });
     });
     
     return `
@@ -598,6 +766,98 @@ export class PreviewServer {
       background: rgba(16, 185, 129, 0.5) !important;
       border-color: rgba(16, 185, 129, 0.6) !important;
     }
+    
+    /* Spin animation for processing */
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    
+    /* New SHARD button */
+    .new-shard-btn {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      padding: 1rem 1.5rem;
+      background: linear-gradient(135deg, rgba(103, 126, 234, 0.8), rgba(147, 51, 234, 0.8));
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: white;
+      border-radius: 12px;
+      cursor: pointer;
+      font-family: 'OpenDyslexic', system-ui, -apple-system, sans-serif;
+      font-weight: 700;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+      z-index: 100;
+      display: none;
+    }
+    
+    .new-shard-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+    }
+    
+    .new-shard-btn.visible {
+      display: block;
+    }
+    
+    /* Version navigation */
+    .version-nav {
+      position: fixed;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 12px;
+      padding: 0.75rem 1.5rem;
+      display: none;
+      align-items: center;
+      gap: 1rem;
+      backdrop-filter: blur(10px);
+      z-index: 50;
+    }
+    
+    .version-nav.visible {
+      display: flex;
+    }
+    
+    .version-dots {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    
+    .version-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.3);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+    
+    .version-dot:hover {
+      background: rgba(255, 255, 255, 0.5);
+      transform: scale(1.2);
+    }
+    
+    .version-dot.active {
+      background: #9333ea;
+      transform: scale(1.3);
+    }
+    
+    .version-dot::after {
+      content: attr(data-version);
+      position: absolute;
+      bottom: -20px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.7rem;
+      color: rgba(255, 255, 255, 0.7);
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>
@@ -612,7 +872,10 @@ export class PreviewServer {
           <div class="file-item ${file.path === selectedComponent ? 'active' : ''} ${index === 0 ? 'newest' : ''}" 
                data-component="${file.path}">
             <div class="file-content" data-path="${file.path}">
-              <div class="file-type" style="font-size: 0.75rem; opacity: 0.7; text-transform: uppercase; margin-bottom: 0.25rem;">${file.type}</div>
+              <div class="file-type" style="font-size: 0.75rem; opacity: 0.7; text-transform: uppercase; margin-bottom: 0.25rem;">
+                ${file.type}
+                ${file.hasVersions ? `<span style="float: right; color: #9333ea;">💎 ${file.versionCount} shards</span>` : ''}
+              </div>
               <div class="file-name">${file.name}</div>
               <div class="file-time">${file.time}</div>
             </div>
@@ -632,6 +895,13 @@ export class PreviewServer {
     </aside>
     <main class="main-content">
       ${selectedComponent ? `
+        <div class="version-indicator" id="versionIndicator" style="position: absolute; top: 1rem; right: 1rem; z-index: 10; 
+             background: rgba(0, 0, 0, 0.8); padding: 0.5rem 1rem; border-radius: 8px; 
+             border: 1px solid rgba(255, 255, 255, 0.2); display: none;">
+          <span style="color: white; font-size: 0.875rem; font-family: 'OpenDyslexic', system-ui, -apple-system, sans-serif;">
+            Version: <span id="currentVersion">v1</span>
+          </span>
+        </div>
         <iframe class="preview-frame" src="/generated/${selectedComponent}"></iframe>
       ` : `
         <div style="display: flex; align-items: center; justify-content: center; height: 100%; opacity: 0.5;">
@@ -651,6 +921,54 @@ export class PreviewServer {
         <button onclick="cancelDelete()">Cancel</button>
         <button class="confirm" onclick="confirmDelete()">Delete</button>
       </div>
+    </div>
+  </div>
+  
+  <!-- New SHARD modal -->
+  <div class="modal" id="shardModal">
+    <div class="modal-content">
+      <h3 style="margin-top: 0;">💎 Create New SHARD</h3>
+      <p>Describe how you want to modify this component:</p>
+      <textarea id="shardPrompt" 
+        style="width: 100%; min-height: 100px; margin-top: 1rem; padding: 0.75rem; 
+               border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); 
+               background: rgba(255, 255, 255, 0.1); color: white; resize: vertical;
+               font-family: 'OpenDyslexic', system-ui, -apple-system, sans-serif;"
+        placeholder="e.g., Make it more colorful, Add animations, Change the layout..."></textarea>
+      <div class="modal-buttons">
+        <button onclick="cancelShard()">Cancel</button>
+        <button class="confirm" onclick="createShard()" style="background: rgba(103, 126, 234, 0.5); border-color: rgba(103, 126, 234, 0.6);">Create SHARD</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Processing modal -->
+  <div class="modal" id="processingModal">
+    <div class="modal-content" style="text-align: center;">
+      <div class="processing-animation" style="margin: 2rem 0;">
+        <div style="font-size: 3rem; animation: spin 2s linear infinite;">💎</div>
+      </div>
+      <h3>Creating New SHARD...</h3>
+      <p id="processingStatus" style="opacity: 0.7;">Analyzing component structure...</p>
+      <p id="modelInfo" style="opacity: 0.5; font-size: 0.875rem; margin-top: 0.5rem;"></p>
+      <div style="margin-top: 1.5rem; width: 100%; max-width: 300px;">
+        <div style="height: 4px; background: rgba(255, 255, 255, 0.1); border-radius: 2px; overflow: hidden;">
+          <div id="progressBar" style="height: 100%; background: linear-gradient(90deg, #9333ea, #667eea); 
+                                       width: 0%; transition: width 0.3s ease; border-radius: 2px;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- New SHARD button (shows when component is selected) -->
+  <button class="new-shard-btn ${selectedComponent ? 'visible' : ''}" onclick="showShardModal()">
+    💎 New SHARD
+  </button>
+  
+  <!-- Version navigation -->
+  <div class="version-nav" id="versionNav">
+    <div class="version-dots" id="versionDots">
+      <!-- Dots will be populated by JavaScript -->
     </div>
   </div>
   
@@ -675,6 +993,78 @@ export class PreviewServer {
       if (clickedItem) {
         clickedItem.classList.add('active');
       }
+      
+      // Show/hide New SHARD button
+      const shardBtn = document.querySelector('.new-shard-btn');
+      if (shardBtn) {
+        shardBtn.classList.add('visible');
+      }
+      
+      // Parse and show version
+      const versionMatch = path.match(/-v(\d+)\.html$/);
+      const version = versionMatch ? parseInt(versionMatch[1]) : 1;
+      const versionIndicator = document.getElementById('versionIndicator');
+      const currentVersionSpan = document.getElementById('currentVersion');
+      
+      if (versionIndicator && currentVersionSpan) {
+        currentVersionSpan.textContent = 'v' + version;
+        if (version > 1) {
+          versionIndicator.style.display = 'block';
+        } else {
+          versionIndicator.style.display = 'none';
+        }
+      }
+      
+      // Get gem ID and fetch all versions
+      const nameMatch = path.match(/^(.+?)(?:-v\d+)?\.html$/);
+      console.log('Checking versions for path:', path, 'nameMatch:', nameMatch);
+      if (nameMatch) {
+        const gemId = nameMatch[1];
+        console.log('Fetching versions for gemId:', gemId);
+        
+        fetch('/api/gem-versions?gemId=' + encodeURIComponent(gemId))
+          .then(res => res.json())
+          .then(data => {
+            const versions = data.versions || [];
+            console.log('Found versions:', versions);
+            const versionNav = document.getElementById('versionNav');
+            const versionDots = document.getElementById('versionDots');
+            
+            if (versions.length > 1 && versionNav && versionDots) {
+              console.log('Showing version nav with', versions.length, 'versions');
+              // Clear existing dots
+              versionDots.innerHTML = '';
+              
+              // Create dots for each version
+              versions.forEach((versionFile, index) => {
+                const vMatch = versionFile.match(/-v(\d+)\.html$/);
+                const versionNum = vMatch ? parseInt(vMatch[1]) : 1;
+                const dot = document.createElement('div');
+                dot.className = 'version-dot';
+                dot.setAttribute('data-version', 'v' + versionNum);
+                dot.setAttribute('data-path', versionFile);
+                
+                if (versionFile === path) {
+                  dot.classList.add('active');
+                }
+                
+                dot.onclick = () => {
+                  loadComponent(versionFile);
+                };
+                
+                versionDots.appendChild(dot);
+              });
+              
+              versionNav.classList.add('visible');
+            } else if (versionNav) {
+              versionNav.classList.remove('visible');
+            }
+          })
+          .catch(err => {
+            console.error('Failed to fetch versions:', err);
+          });
+      }
+      
       
       // Update URL without reload
       const newUrl = new URL(window.location);
@@ -824,6 +1214,122 @@ export class PreviewServer {
       cancelDelete();
     }
     
+    let currentGemId = null;
+    
+    function showShardModal() {
+      const activeItem = document.querySelector('.file-item.active');
+      if (!activeItem) return;
+      
+      const path = activeItem.querySelector('.file-content').dataset.path;
+      currentGemId = path.replace('.html', '');
+      
+      document.getElementById('shardModal').classList.add('show');
+      document.getElementById('shardPrompt').focus();
+    }
+    
+    function cancelShard() {
+      document.getElementById('shardModal').classList.remove('show');
+      document.getElementById('shardPrompt').value = '';
+      currentGemId = null;
+    }
+    
+    async function createShard() {
+      const prompt = document.getElementById('shardPrompt').value.trim();
+      if (!prompt || !currentGemId) return;
+      
+      // Hide shard modal and show processing modal
+      document.getElementById('shardModal').classList.remove('show');
+      document.getElementById('processingModal').classList.add('show');
+      
+      // Get current model info
+      try {
+        const configRes = await fetch('/api/current-config');
+        const config = await configRes.json();
+        const modelInfo = document.getElementById('modelInfo');
+        if (modelInfo) {
+          if (config.defaultModel === 'cloud') {
+            modelInfo.textContent = 'Using: ' + (config.cloudModel || 'OpenRouter');
+          } else {
+            modelInfo.textContent = 'Using: Local LM Studio';
+          }
+        }
+      } catch (err) {
+        console.log('Could not fetch config');
+      }
+      
+      // Update status messages and progress bar
+      const statusMessages = [
+        'Analyzing component structure...',
+        'Understanding your requirements...',
+        'Applying modifications...',
+        'Generating new SHARD...',
+        'Finalizing component...'
+      ];
+      
+      let messageIndex = 0;
+      const totalDuration = 30000; // Expected 30 seconds max
+      const startTime = Date.now();
+      const progressBar = document.getElementById('progressBar');
+      
+      const updateProgress = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min((elapsed / totalDuration) * 100, 95); // Cap at 95% until done
+        
+        if (progressBar) {
+          progressBar.style.width = progress + '%';
+        }
+        
+        // Update message based on progress
+        const newMessageIndex = Math.min(Math.floor((progress / 100) * statusMessages.length), statusMessages.length - 1);
+        if (newMessageIndex !== messageIndex) {
+          messageIndex = newMessageIndex;
+          const statusEl = document.getElementById('processingStatus');
+          if (statusEl) {
+            statusEl.textContent = statusMessages[messageIndex];
+          }
+        }
+      };
+      
+      const progressInterval = setInterval(updateProgress, 100);
+      
+      try {
+        const response = await fetch('/api/create-shard', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gemId: currentGemId, prompt })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to create SHARD');
+        }
+        
+        const data = await response.json();
+        
+        // Clear interval and complete progress
+        clearInterval(progressInterval);
+        if (progressBar) {
+          progressBar.style.width = '100%';
+        }
+        
+        // Short delay to show completion
+        setTimeout(() => {
+          document.getElementById('processingModal').classList.remove('show');
+          
+          // Reset form
+          document.getElementById('shardPrompt').value = '';
+          currentGemId = null;
+          
+          // Reload to show new version
+          window.location.href = '/?component=' + encodeURIComponent(data.newFile);
+        }, 500);
+      } catch (error) {
+        clearInterval(progressInterval);
+        document.getElementById('processingModal').classList.remove('show');
+        console.error('Failed to create SHARD:', error);
+        alert('Failed to create new SHARD: ' + error.message);
+      }
+    }
+    
     // Handle browser back/forward
     window.addEventListener('popstate', () => {
       const urlParams = new URLSearchParams(window.location.search);
@@ -837,6 +1343,12 @@ export class PreviewServer {
     document.getElementById('deleteModal').addEventListener('click', (e) => {
       if (e.target.id === 'deleteModal') {
         cancelDelete();
+      }
+    });
+    
+    document.getElementById('shardModal').addEventListener('click', (e) => {
+      if (e.target.id === 'shardModal') {
+        cancelShard();
       }
     });
     
