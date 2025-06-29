@@ -66,8 +66,20 @@ export class PreviewServer {
               const newHtml = join(process.cwd(), 'generated', newName);
               const newJs = newHtml.replace('.html', '.js');
               
-              if (existsSync(oldHtml)) renameSync(oldHtml, newHtml);
+              // Rename JS file first
               if (existsSync(oldJs)) renameSync(oldJs, newJs);
+              
+              // Update HTML file content to reference new JS file
+              if (existsSync(oldHtml)) {
+                let htmlContent = readFileSync(oldHtml, 'utf-8');
+                const oldJsName = oldName.replace('.html', '.js');
+                const newJsName = newName.replace('.html', '.js');
+                htmlContent = htmlContent.replace(`src="./${oldJsName}"`, `src="./${newJsName}"`);
+                writeFileSync(newHtml, htmlContent);
+                
+                // Delete old HTML file after writing new one
+                unlinkSync(oldHtml);
+              }
               
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ success: true }));
@@ -217,28 +229,30 @@ export class PreviewServer {
                 .replace(/^(?:Here'?s?\s+(?:the|your)\s+(?:code|component|modified version)|The\s+(?:code|component|modified version)\s+is)[:\s]*/i, '')
                 .trim();
               
-              // Validate the modified code
-              const { ComponentValidator } = await import('../validators/ComponentValidator.js');
-              const validator = new ComponentValidator();
-              const validation = validator.validate(cleanCode);
-              
-              if (!validation.isValid) {
-                console.log('🔧 Shard validation failed, attempting auto-fix...');
+              // Quick sanity check - just make sure it looks like a web component
+              if (!cleanCode.includes('customElements.define') || !cleanCode.includes('extends HTMLElement')) {
+                console.error('⚠️  Modified code missing web component structure');
+                console.error('Raw AI response:', modifiedCode);
+                console.error('Cleaned code:', cleanCode);
                 
-                // Try to auto-fix
-                const fixResult = validator.attemptAutoFix(cleanCode);
-                if (fixResult.fixed) {
-                  console.log('✨ Applied fixes:', fixResult.changes.join(', '));
-                  cleanCode = fixResult.code;
-                  
-                  // Re-validate
-                  const revalidation = validator.validate(cleanCode);
-                  if (!revalidation.isValid) {
-                    throw new Error(`Shard generation failed: ${revalidation.errors.join('; ')}`);
-                  }
-                } else {
-                  throw new Error(`Shard generation failed: ${validation.errors.join('; ')}`);
+                // Save failed generation for debugging
+                const failedDir = join(process.cwd(), 'failed-generations');
+                if (!existsSync(failedDir)) {
+                  mkdirSync(failedDir, { recursive: true });
                 }
+                
+                const failedFile = join(failedDir, `shard-${Date.now()}.json`);
+                writeFileSync(failedFile, JSON.stringify({
+                  timestamp: new Date().toISOString(),
+                  prompt: modificationPrompt,
+                  aiResponse: modifiedCode,
+                  cleanedCode: cleanCode,
+                  originalComponent: originalJsPath,
+                  model: result.source
+                }, null, 2));
+                
+                console.error(`Failed generation saved to: ${failedFile}`);
+                throw new Error('Generated code does not appear to be a valid web component');
               }
               
               // Create new filenames with version
@@ -255,6 +269,18 @@ export class PreviewServer {
               // Write new files
               writeFileSync(join(generatedDir, newHtmlName), newHtml);
               writeFileSync(join(generatedDir, newJsName), cleanCode);
+              
+              // Save metadata for the shard
+              const metadataPath = join(generatedDir, `${parsed.gemId}-v${nextVersion}.meta.json`);
+              const metadata = {
+                type: parsed.type,
+                created: new Date(),
+                prompt: modificationPrompt,
+                aiSource: result.source,
+                version: nextVersion,
+                baseGem: parsed.gemId
+              };
+              writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
               
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ 
@@ -302,7 +328,7 @@ export class PreviewServer {
               const generator = new ComponentGenerator(aiService);
               
               const result = await generator.generate({
-                type: type === 'custom' ? 'component' : type,
+                type: type === 'custom' ? 'custom' : type,
                 description
               });
               
@@ -498,7 +524,7 @@ export class PreviewServer {
     const selectedComponent = component || (componentFiles[0]?.name);
     
     // Group files by GEM ID
-    const gemGroups = new Map<string, Array<{name: string, path: string, time: string, type: string, version: number}>>();
+    const gemGroups = new Map<string, Array<{name: string, path: string, time: string, type: string, version: number, metadata?: any}>>();
     
     componentFiles.forEach(f => {
       const parsed = this.parseGemFilename(f.name);
@@ -508,12 +534,24 @@ export class PreviewServer {
         gemGroups.set(gemId, []);
       }
       
+      // Try to read metadata file
+      let metadata: any = null;
+      const metadataPath = join(generatedDir, f.name.replace('.html', '.meta.json'));
+      if (existsSync(metadataPath)) {
+        try {
+          metadata = JSON.parse(readFileSync(metadataPath, 'utf-8'));
+        } catch (e) {
+          // Ignore metadata read errors
+        }
+      }
+      
       gemGroups.get(gemId)!.push({
         name: f.name.replace('.html', ''),
         path: f.name,
         time: f.time.toLocaleString(),
         type: parsed.type,
-        version: parsed.version
+        version: parsed.version,
+        metadata
       });
     });
     
@@ -667,24 +705,13 @@ export class PreviewServer {
       background: rgba(255, 255, 255, 0.05);
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
-      border-right: 2px solid transparent;
-      animation: rainbow-border 3s linear infinite;
+      border-right: 2px solid rgba(255, 255, 255, 0.1);
       position: relative;
       overflow: hidden;
       display: flex;
       flex-direction: column;
     }
     
-    .sidebar::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      animation: rainbow-glow 3s linear infinite;
-      pointer-events: none;
-    }
     
     .sidebar-header {
       padding: 2rem;
@@ -712,12 +739,12 @@ export class PreviewServer {
       display: flex;
       gap: 0.5rem;
       margin-top: 1rem;
+      width: 100%;
     }
     
-    .create-gem-btn {
+    .create-gem-btn, .create-shard-btn {
       flex: 1;
-      padding: 0.75rem 1rem;
-      background: linear-gradient(135deg, rgba(147, 51, 234, 0.8), rgba(103, 126, 234, 0.8));
+      padding: 0.5rem 0.75rem;
       border: 1px solid rgba(255, 255, 255, 0.2);
       color: white;
       border-radius: 8px;
@@ -725,7 +752,34 @@ export class PreviewServer {
       font-family: 'OpenDyslexic Nerd Font', 'OpenDyslexicNerdFont', 'OpenDyslexic', system-ui, -apple-system, sans-serif;
       font-weight: 700;
       transition: all 0.3s ease;
-      font-size: 0.875rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    .create-gem-btn {
+      background: linear-gradient(135deg, rgba(147, 51, 234, 0.8), rgba(103, 126, 234, 0.8));
+    }
+    
+    .create-shard-btn {
+      background: linear-gradient(135deg, rgba(103, 126, 234, 0.8), rgba(147, 51, 234, 0.8));
+    }
+    
+    .btn-emoji {
+      font-size: 1.5rem;
+      line-height: 1;
+    }
+    
+    .btn-text {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      line-height: 1;
+    }
+    
+    .btn-text span {
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
     }
     
     .create-gem-btn:hover {
@@ -733,25 +787,41 @@ export class PreviewServer {
       box-shadow: 0 4px 12px rgba(147, 51, 234, 0.4);
     }
     
+    .create-shard-btn:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(103, 126, 234, 0.4);
+    }
+    
+    .create-shard-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
     .settings-btn {
-      width: 40px;
-      height: 40px;
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      width: 50px;
+      height: 50px;
       padding: 0;
       background: rgba(255, 255, 255, 0.1);
       border: 1px solid rgba(255, 255, 255, 0.2);
       color: white;
-      border-radius: 8px;
+      border-radius: 12px;
       cursor: pointer;
-      font-size: 1.25rem;
+      font-size: 1.5rem;
       display: flex;
       align-items: center;
       justify-content: center;
       transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+      z-index: 100;
     }
     
     .settings-btn:hover {
       background: rgba(255, 255, 255, 0.2);
       transform: rotate(45deg);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
     }
     
     .file-list {
@@ -792,36 +862,18 @@ export class PreviewServer {
       transform: translateX(10px);
     }
     
-    .file-item.active::before {
-      content: '';
-      position: absolute;
-      left: 0;
-      top: 0;
-      bottom: 0;
-      width: 3px;
-      background: linear-gradient(to bottom, var(--rainbow-1), var(--rainbow-7));
-      animation: rainbow-gradient 3s linear infinite;
-    }
     
-    @keyframes rainbow-gradient {
-      0% { filter: hue-rotate(0deg); }
-      100% { filter: hue-rotate(360deg); }
-    }
     
     .file-item.newest {
       position: relative;
     }
     
     .file-item.newest::after {
-      content: '✨ NEW';
+      content: '✨';
       position: absolute;
       top: 0.5rem;
       right: 0.5rem;
-      font-size: 0.75rem;
-      background: linear-gradient(45deg, var(--rainbow-1), var(--rainbow-7));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      font-weight: 700;
+      font-size: 1rem;
     }
     
     .file-name {
@@ -973,6 +1025,12 @@ export class PreviewServer {
       }
     }
     
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-5px); }
+      75% { transform: translateX(5px); }
+    }
+    
     .modal-buttons {
       display: flex;
       gap: 1rem;
@@ -1017,33 +1075,6 @@ export class PreviewServer {
       to { transform: rotate(360deg); }
     }
     
-    /* New SHARD button */
-    .new-shard-btn {
-      position: fixed;
-      bottom: 2rem;
-      right: 2rem;
-      padding: 1rem 1.5rem;
-      background: linear-gradient(135deg, rgba(103, 126, 234, 0.8), rgba(147, 51, 234, 0.8));
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      color: white;
-      border-radius: 12px;
-      cursor: pointer;
-      font-family: 'OpenDyslexic Nerd Font', 'OpenDyslexicNerdFont', 'OpenDyslexic', system-ui, -apple-system, sans-serif;
-      font-weight: 700;
-      transition: all 0.3s ease;
-      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
-      z-index: 100;
-      display: none;
-    }
-    
-    .new-shard-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-    }
-    
-    .new-shard-btn.visible {
-      display: block;
-    }
     
     /* Version links styles */
     .version-links {
@@ -1104,10 +1135,18 @@ export class PreviewServer {
         <p class="tagline">Generative Element Management System</p>
         <div class="header-actions">
           <button class="create-gem-btn" onclick="showCreateGemModal()">
-            ✨ Create New GEM
+            <span class="btn-emoji">✨</span>
+            <span class="btn-text">
+              <span>NEW</span>
+              <span>GEM</span>
+            </span>
           </button>
-          <button class="settings-btn" onclick="showSettingsModal()" title="Settings">
-            ⚙️
+          <button class="create-shard-btn ${selectedComponent ? '' : 'disabled'}" onclick="showShardModal()" ${selectedComponent ? '' : 'disabled'}>
+            <span class="btn-emoji">💎</span>
+            <span class="btn-text">
+              <span>NEW</span>
+              <span>SHARD</span>
+            </span>
           </button>
         </div>
       </div>
@@ -1118,7 +1157,7 @@ export class PreviewServer {
             <div class="file-content" data-path="${file.path}">
               <div class="file-type" style="font-size: 0.75rem; opacity: 0.7; text-transform: uppercase; margin-bottom: 0.25rem;">
                 ${file.type}
-                ${file.hasVersions ? `<span style="float: right; color: #9333ea;">💎 ${file.versionCount} shards</span>` : ''}
+                ${file.hasVersions ? `<span style="float: right; color: #9333ea; padding-right: 1.5rem;">💎 ${file.versionCount} shards</span>` : ''}
               </div>
               <div class="file-name">${file.name}</div>
               <div class="file-time">${file.time}</div>
@@ -1133,6 +1172,7 @@ export class PreviewServer {
                 ${file.allVersions.slice(0, file.versionCount).map((version: any) => `
                   <div class="version-link ${version.path === selectedComponent ? 'active' : ''}" 
                        data-path="${version.path}"
+                       ${version.metadata ? `data-metadata='${JSON.stringify(version.metadata).replace(/'/g, '&#39;')}'` : ''}
                        onclick="selectVersion('${version.path}')">
                     <span>SHARD ${version.version}</span>
                     <span style="opacity: 0.6; font-size: 0.65rem;">${new Date(parseInt(version.path.match(/-(\d+)/)[1])).toLocaleTimeString()}</span>
@@ -1240,6 +1280,11 @@ export class PreviewServer {
     </main>
   </div>
   
+  <!-- Settings button (bottom-right) -->
+  <button class="settings-btn" onclick="showSettingsModal()" title="Settings">
+    ⚙️
+  </button>
+  
   <!-- Delete confirmation modal -->
   <div class="modal" id="deleteModal">
     <div class="modal-content" style="max-width: 500px;">
@@ -1302,10 +1347,6 @@ export class PreviewServer {
     </div>
   </div>
   
-  <!-- New SHARD button (shows when component is selected) -->
-  <button class="new-shard-btn ${selectedComponent ? 'visible' : ''}" onclick="showShardModal()">
-    💎 New SHARD
-  </button>
   
   <!-- Create GEM modal -->
   <div class="modal" id="createGemModal">
@@ -1360,6 +1401,56 @@ export class PreviewServer {
       <div class="modal-buttons">
         <button onclick="cancelSettings()">Cancel</button>
         <button class="confirm" onclick="saveSettings()" style="background: rgba(103, 126, 234, 0.5); border-color: rgba(103, 126, 234, 0.6);">Save Settings</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Edit/Rename GEM modal -->
+  <div class="modal" id="editModal">
+    <div class="modal-content" style="max-width: 600px;">
+      <h3 style="margin-top: 0;">✏️ Edit GEM/SHARD</h3>
+      
+      <div style="margin: 1.5rem 0;">
+        <label style="display: block; margin-bottom: 0.5rem; font-size: 0.875rem; opacity: 0.8;">Component Name:</label>
+        <input type="text" id="editComponentName" 
+          style="width: 100%; padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); 
+                 background: rgba(255, 255, 255, 0.1); color: white; font-family: inherit;"
+          placeholder="Enter new component name...">
+        <p style="font-size: 0.75rem; opacity: 0.6; margin-top: 0.5rem;">
+          Note: The timestamp will be preserved automatically
+        </p>
+      </div>
+      
+      <div id="metadataInfo" style="margin: 1.5rem 0; display: none;">
+        <div style="padding: 1rem; background: rgba(255, 255, 255, 0.05); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
+          <h4 style="margin: 0 0 0.75rem 0; font-size: 0.875rem; opacity: 0.8;">Generation Details</h4>
+          
+          <div id="promptInfo" style="margin-bottom: 1rem; display: none;">
+            <label style="display: block; margin-bottom: 0.25rem; font-size: 0.75rem; opacity: 0.6;">Prompt:</label>
+            <div id="promptText" style="padding: 0.5rem; background: rgba(0, 0, 0, 0.2); border-radius: 4px; 
+                                        font-size: 0.875rem; line-height: 1.4; max-height: 100px; overflow-y: auto;"></div>
+          </div>
+          
+          <div id="modelInfo" style="display: none;">
+            <label style="display: block; margin-bottom: 0.25rem; font-size: 0.75rem; opacity: 0.6;">Model:</label>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span id="modelType" style="padding: 0.25rem 0.5rem; background: rgba(103, 126, 234, 0.3); 
+                                          border-radius: 4px; font-size: 0.75rem;"></span>
+              <span id="modelName" style="font-size: 0.875rem; opacity: 0.8;"></span>
+            </div>
+          </div>
+          
+          <div id="noMetadata" style="display: none;">
+            <p style="margin: 0; opacity: 0.6; font-size: 0.875rem; font-style: italic;">
+              No generation details available for this component
+            </p>
+          </div>
+        </div>
+      </div>
+      
+      <div class="modal-buttons">
+        <button onclick="cancelEdit()">Cancel</button>
+        <button class="confirm" onclick="confirmEdit()" style="background: rgba(103, 126, 234, 0.5); border-color: rgba(103, 126, 234, 0.6);">Save Changes</button>
       </div>
     </div>
   </div>
@@ -1450,10 +1541,11 @@ export class PreviewServer {
         });
       }
       
-      // Show/hide New SHARD button
-      const shardBtn = document.querySelector('.new-shard-btn');
+      // Enable/disable New SHARD button in header
+      const shardBtn = document.querySelector('.create-shard-btn');
       if (shardBtn) {
-        shardBtn.classList.add('visible');
+        shardBtn.disabled = false;
+        shardBtn.classList.remove('disabled');
       }
       
       // Parse and show version
@@ -1569,9 +1661,132 @@ export class PreviewServer {
       }
     }
     
+    let editingComponent = null;
+    let editingMetadata = null;
+    
     async function renameComponent(path) {
-      const newName = prompt('Enter new name for the component:', path.replace('.html', ''));
-      if (!newName || newName === path.replace('.html', '')) return;
+      editingComponent = path;
+      
+      // Extract the type and timestamp from current filename
+      const currentName = path.replace('.html', '');
+      const parts = currentName.split('-');
+      const timestamp = parts[parts.length - 1];
+      const currentType = parts.slice(0, -1).join('-');
+      
+      // Set the current name in the input
+      document.getElementById('editComponentName').value = currentType;
+      
+      // Try to load metadata
+      const metadataPath = path.replace('.html', '.meta.json');
+      try {
+        // Get the metadata for this file from the active file item
+        const activeItem = document.querySelector('.file-item.active');
+        if (activeItem) {
+          // Find the version that's currently selected
+          const versionData = Array.from(activeItem.querySelectorAll('.version-link'))
+            .find(link => link.dataset.path === path);
+          
+          if (versionData && versionData.dataset.metadata) {
+            editingMetadata = JSON.parse(versionData.dataset.metadata);
+          }
+        }
+        
+        // If no metadata in DOM, try to fetch it
+        if (!editingMetadata) {
+          const response = await fetch('/generated/' + metadataPath);
+          if (response.ok) {
+            editingMetadata = await response.json();
+          }
+        }
+      } catch (e) {
+        console.log('No metadata available for', path);
+      }
+      
+      // Show/hide metadata info
+      const metadataInfoDiv = document.getElementById('metadataInfo');
+      const promptInfoDiv = document.getElementById('promptInfo');
+      const modelInfoDiv = document.getElementById('modelInfo');
+      const noMetadataDiv = document.getElementById('noMetadata');
+      
+      if (editingMetadata) {
+        metadataInfoDiv.style.display = 'block';
+        
+        // Show prompt if available
+        if (editingMetadata.prompt) {
+          promptInfoDiv.style.display = 'block';
+          document.getElementById('promptText').textContent = editingMetadata.prompt;
+        } else {
+          promptInfoDiv.style.display = 'none';
+        }
+        
+        // Show model info if available
+        if (editingMetadata.aiSource) {
+          modelInfoDiv.style.display = 'block';
+          const modelType = document.getElementById('modelType');
+          const modelName = document.getElementById('modelName');
+          
+          modelType.textContent = editingMetadata.aiSource.type === 'local' ? '🏠 Local' : 
+                                  editingMetadata.aiSource.type === 'cloud' ? '☁️ Cloud' : 
+                                  editingMetadata.aiSource.type === 'network' ? '🌐 Network' : 
+                                  '📝 Template';
+          
+          modelName.textContent = editingMetadata.aiSource.model || 'Unknown Model';
+        } else {
+          modelInfoDiv.style.display = 'none';
+        }
+        
+        noMetadataDiv.style.display = 'none';
+      } else {
+        metadataInfoDiv.style.display = 'block';
+        promptInfoDiv.style.display = 'none';
+        modelInfoDiv.style.display = 'none';
+        noMetadataDiv.style.display = 'block';
+      }
+      
+      // Show the modal
+      document.getElementById('editModal').classList.add('show');
+      document.getElementById('editComponentName').focus();
+    }
+    
+    function cancelEdit() {
+      document.getElementById('editModal').classList.remove('show');
+      editingComponent = null;
+      editingMetadata = null;
+    }
+    
+    async function confirmEdit() {
+      if (!editingComponent) return;
+      
+      const newType = document.getElementById('editComponentName').value.trim();
+      if (!newType) {
+        // Add error feedback
+        const input = document.getElementById('editComponentName');
+        input.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+        input.style.animation = 'shake 0.3s ease';
+        setTimeout(() => {
+          input.style.borderColor = '';
+          input.style.animation = '';
+        }, 300);
+        return;
+      }
+      
+      // Extract timestamp from current name
+      const currentName = editingComponent.replace('.html', '');
+      const parts = currentName.split('-');
+      const timestamp = parts[parts.length - 1];
+      const currentType = parts.slice(0, -1).join('-');
+      
+      // Skip if name hasn't changed
+      if (newType === currentType) {
+        cancelEdit();
+        return;
+      }
+      
+      // Auto-append the timestamp if user didn't include it
+      let newName = newType;
+      if (!newName.includes(timestamp)) {
+        newName = newType + '-' + timestamp;
+      }
       
       const newFilename = newName.endsWith('.html') ? newName : newName + '.html';
       
@@ -1579,19 +1794,22 @@ export class PreviewServer {
         const response = await fetch('/api/rename', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ oldName: path, newName: newFilename })
+          body: JSON.stringify({ oldName: editingComponent, newName: newFilename })
         });
         
         if (response.ok) {
           // Reload to show updated list
           window.location.reload();
         } else {
-          alert('Failed to rename component');
+          const error = await response.json();
+          alert('Failed to rename component: ' + (error.error || 'Unknown error'));
         }
       } catch (error) {
         console.error('Failed to rename:', error);
-        alert('Failed to rename component');
+        alert('Failed to rename component: ' + error.message);
       }
+      
+      cancelEdit();
     }
     
     function deleteComponent(path) {
@@ -1836,6 +2054,57 @@ export class PreviewServer {
       document.getElementById('processingModal').classList.add('show');
       document.getElementById('processingStatus').textContent = 'Creating your new GEM...';
       
+      // Get current model info
+      try {
+        const configRes = await fetch('/api/current-config');
+        const config = await configRes.json();
+        const modelInfo = document.getElementById('modelInfo');
+        if (modelInfo) {
+          if (config.defaultModel === 'cloud') {
+            modelInfo.textContent = 'Using: ' + (config.cloudModel || 'OpenRouter');
+          } else {
+            modelInfo.textContent = 'Using: Local LM Studio';
+          }
+        }
+      } catch (err) {
+        console.log('Could not fetch config');
+      }
+      
+      // Update status messages and progress bar
+      const statusMessages = [
+        'Creating your new GEM...',
+        'Analyzing requirements...',
+        'Generating component structure...',
+        'Building web component...',
+        'Finalizing your GEM...'
+      ];
+      
+      let messageIndex = 0;
+      const totalDuration = 30000; // Expected 30 seconds max
+      const startTime = Date.now();
+      const progressBar = document.getElementById('progressBar');
+      
+      const updateProgress = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min((elapsed / totalDuration) * 100, 95); // Cap at 95% until done
+        
+        if (progressBar) {
+          progressBar.style.width = progress + '%';
+        }
+        
+        // Update message based on progress
+        const newMessageIndex = Math.min(Math.floor((progress / 100) * statusMessages.length), statusMessages.length - 1);
+        if (newMessageIndex !== messageIndex) {
+          messageIndex = newMessageIndex;
+          const statusEl = document.getElementById('processingStatus');
+          if (statusEl) {
+            statusEl.textContent = statusMessages[messageIndex];
+          }
+        }
+      };
+      
+      const progressInterval = setInterval(updateProgress, 100);
+      
       try {
         const response = await fetch('/api/create-gem', {
           method: 'POST',
@@ -1849,15 +2118,24 @@ export class PreviewServer {
         
         const data = await response.json();
         
-        // Hide processing modal
-        document.getElementById('processingModal').classList.remove('show');
+        // Clear interval and complete progress
+        clearInterval(progressInterval);
+        if (progressBar) {
+          progressBar.style.width = '100%';
+        }
         
-        // Reset form
-        cancelCreateGem();
-        
-        // Reload to show new component
-        window.location.href = '/?component=' + encodeURIComponent(data.filename);
+        // Short delay to show completion
+        setTimeout(() => {
+          document.getElementById('processingModal').classList.remove('show');
+          
+          // Reset form
+          cancelCreateGem();
+          
+          // Reload to show new component
+          window.location.href = '/?component=' + encodeURIComponent(data.filename);
+        }, 500);
       } catch (error) {
+        clearInterval(progressInterval);
         document.getElementById('processingModal').classList.remove('show');
         console.error('Failed to create GEM:', error);
         alert('Failed to create new GEM: ' + error.message);

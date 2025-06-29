@@ -61,9 +61,21 @@ export class ConfigManager {
     const __dirname = dirname(__filename);
     const projectRoot = resolve(__dirname, '../..');
     
-    // Load environment variables from project root
-    dotenvConfig({ path: join(projectRoot, '.env') });
-    dotenvConfig({ path: join(projectRoot, '.env.local') });
+    // Load environment variables from project root (only if not already loaded)
+    if (!process.env.GEMS_ENV_LOADED) {
+      // Suppress dotenv logging
+      const originalLog = console.log;
+      console.log = () => {};
+      
+      dotenvConfig({ path: join(projectRoot, '.env') });
+      dotenvConfig({ path: join(projectRoot, '.env.local'), override: true });
+      
+      // Restore console.log
+      console.log = originalLog;
+      
+      // Mark as loaded to prevent multiple loads
+      process.env.GEMS_ENV_LOADED = 'true';
+    }
     
     const configDir = join(homedir(), '.gems');
     this.configPath = join(configDir, 'config.json');

@@ -54,6 +54,9 @@ model-cache/
 generated/
 output/
 
+# Failed generation logs (for debugging)
+failed-generations/
+
 # Temporary files
 tmp/
 temp/

@@ -7,7 +7,6 @@ import { featuresTemplate } from '../templates/features.template.js';
 import { testimonialTemplate } from '../templates/testimonial.template.js';
 import { pricingTemplate } from '../templates/pricing.template.js';
 import { faqTemplate } from '../templates/faq.template.js';
-import { ComponentValidator } from '../validators/ComponentValidator.js';
 
 export interface GenerateComponentOptions {
   type: string;
@@ -31,6 +30,12 @@ export interface GeneratedComponent {
     brand?: string;
     style?: string;
     created: Date;
+    prompt?: string;
+    aiSource?: {
+      type: 'local' | 'network' | 'cloud' | 'template';
+      model?: string;
+      endpoint?: string;
+    };
   };
 }
 
@@ -44,11 +49,7 @@ const TEMPLATES: Record<string, any> = {
 };
 
 export class ComponentGenerator {
-  private validator: ComponentValidator;
-  
-  constructor(private aiService: AIService) {
-    this.validator = new ComponentValidator();
-  }
+  constructor(private aiService: AIService) {}
 
   async generate(options: GenerateComponentOptions): Promise<GeneratedComponent> {
     try {
@@ -61,36 +62,13 @@ export class ComponentGenerator {
       // Store the source info for later use
       (this as any).lastSource = result.source;
       
-      // Validate the extracted JavaScript code
+      // Use the extracted code or fall back to default
       let finalJsCode = componentCode.javascript || this.getDefaultComponent(options);
-      const validation = this.validator.validate(finalJsCode);
       
-      if (!validation.isValid) {
-        console.log('🔧 Component validation failed, attempting auto-fix...');
-        
-        // Try to auto-fix common issues
-        const fixResult = this.validator.attemptAutoFix(finalJsCode);
-        if (fixResult.fixed) {
-          console.log('✨ Applied fixes:', fixResult.changes.join(', '));
-          finalJsCode = fixResult.code;
-          
-          // Re-validate after fixes
-          const revalidation = this.validator.validate(finalJsCode);
-          if (!revalidation.isValid) {
-            // If still invalid, create an error component
-            console.error('❌ Component generation failed:', revalidation.errors);
-            finalJsCode = this.createErrorComponent(options, revalidation.errors);
-          }
-        } else {
-          // Create error component if we can't fix it
-          console.error('❌ Component generation failed:', validation.errors);
-          finalJsCode = this.createErrorComponent(options, validation.errors);
-        }
-      }
-      
-      // Show warnings if any
-      if (validation.warnings && validation.warnings.length > 0) {
-        console.log('⚠️  Warnings:', validation.warnings.join(', '));
+      // Quick sanity check - just make sure it has the basic web component structure
+      if (!finalJsCode.includes('customElements.define') || !finalJsCode.includes('extends HTMLElement')) {
+        console.log('⚠️  Generated code missing web component structure, using default template');
+        finalJsCode = this.getDefaultComponent(options);
       }
       
       // Ensure output directory exists in current working directory
@@ -101,7 +79,13 @@ export class ComponentGenerator {
       
       // Generate file paths and content
       const timestamp = Date.now();
-      const componentName = `${options.type}-${timestamp}`;
+      // Sanitize the type for use in filename - keep it short and filesystem-friendly
+      const sanitizedType = options.type
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')  // Replace non-alphanumeric with dashes
+        .replace(/^-+|-+$/g, '')       // Remove leading/trailing dashes
+        .slice(0, 50);                 // Limit to 50 chars max
+      const componentName = `${sanitizedType || 'component'}-${timestamp}`;
       const files = [
         {
           path: join(outputDir, `${componentName}.js`),
@@ -118,14 +102,21 @@ export class ComponentGenerator {
         writeFileSync(file.path, file.content);
       });
       
+      // Save metadata file alongside the component
+      const metadataPath = join(outputDir, `${componentName}.meta.json`);
+      const metadata = {
+        type: options.type,
+        brand: options.brand,
+        style: options.style,
+        created: new Date(),
+        prompt,
+        aiSource: (this as any).lastSource
+      };
+      writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+      
       return {
         files,
-        metadata: {
-          type: options.type,
-          brand: options.brand,
-          style: options.style,
-          created: new Date()
-        }
+        metadata
       };
     } catch (error) {
       console.error('💥 Unexpected error during component generation:', error);
@@ -197,7 +188,13 @@ export class ComponentGenerator {
         prompt += `- Visual style: ${options.style}\n`;
       }
       
-      prompt += '\n\nIMPORTANT: Return ONLY the JavaScript code for the web component. Do not include any explanations, descriptions, or text before or after the code. The response should start with "class" and end with "customElements.define". Output the code in a JavaScript code block using ```javascript```.';
+      prompt += '\n\nCRITICAL OUTPUT REQUIREMENTS:\n';
+      prompt += '1. Return ONLY the JavaScript code for the web component\n';
+      prompt += '2. Do NOT include ANY explanations, descriptions, or commentary\n';
+      prompt += '3. Your response must start with ```javascript\n';
+      prompt += '4. Your response must end with ```\n';
+      prompt += '5. The code itself should start with "class" and end with "customElements.define"\n';
+      prompt += '6. Do not include any text outside the code block';
       
       return prompt;
     }
@@ -263,6 +260,12 @@ export class ComponentGenerator {
     // Remove common AI explanatory text patterns
     let cleaned = code;
     
+    // Remove markdown artifacts that might have been included
+    cleaned = cleaned.replace(/^```[\w]*\n?/, '').replace(/\n?```$/, '');
+    
+    // Remove "Here's the code:" type prefixes
+    cleaned = cleaned.replace(/^(?:Here'?s?\s+(?:the|your)\s+(?:code|component)|The\s+(?:code|component)\s+is)[:\s]*/i, '');
+    
     // Remove leading explanatory text before class definition
     const classStart = cleaned.match(/class\s+\w+\s+extends\s+HTMLElement/);
     if (classStart && classStart.index && classStart.index > 0) {
@@ -273,22 +276,13 @@ export class ComponentGenerator {
       }
     }
     
-    // Remove trailing explanatory text after customElements.define
-    const defineMatch = cleaned.match(/customElements\.define\([^)]+\);?/);
+    // Find customElements.define and ensure we capture everything up to it
+    const defineMatch = cleaned.match(/customElements\.define\s*\([^)]+\)\s*;?/);
     if (defineMatch && defineMatch.index !== undefined) {
       const endIndex = defineMatch.index + defineMatch[0].length;
-      const afterDefine = cleaned.substring(endIndex);
-      // If there's content after that doesn't look like code, remove it
-      if (afterDefine && !/^\s*[\n\r]*$/.test(afterDefine) && !afterDefine.trim().startsWith('//')) {
-        cleaned = cleaned.substring(0, endIndex);
-      }
+      // Keep everything up to and including the customElements.define
+      cleaned = cleaned.substring(0, endIndex);
     }
-    
-    // Remove markdown artifacts that might have been included
-    cleaned = cleaned.replace(/^```[\w]*\n?/, '').replace(/\n?```$/, '');
-    
-    // Remove "Here's the code:" type prefixes
-    cleaned = cleaned.replace(/^(?:Here'?s?\s+(?:the|your)\s+(?:code|component)|The\s+(?:code|component)\s+is)[:\s]*/i, '');
     
     return cleaned.trim();
   }
@@ -664,11 +658,19 @@ class ${className} extends HTMLElement {
         }
         
         .error-message {
-          background: white;
+          background: rgba(255, 255, 255, 0.05);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
           padding: 1rem;
           border-radius: 8px;
           margin-bottom: 1rem;
-          border-left: 4px solid #dc2626;
+          border: 1px solid rgba(220, 38, 38, 0.3);
+          box-shadow: 0 4px 12px rgba(220, 38, 38, 0.1);
+        }
+        
+        .error-message p {
+          color: rgba(255, 255, 255, 0.9);
+          margin: 0 0 1rem 0;
         }
         
         .error-details {
@@ -679,7 +681,8 @@ class ${className} extends HTMLElement {
         
         .error-details li {
           padding: 0.5rem 0;
-          border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+          color: rgba(255, 255, 255, 0.8);
         }
         
         .error-details li:last-child {
@@ -690,9 +693,26 @@ class ${className} extends HTMLElement {
           margin-top: 1rem;
           padding: 1rem;
           background: rgba(59, 130, 246, 0.1);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
           border-radius: 8px;
-          color: #1e40af;
+          color: #93bbfc;
           font-size: 0.875rem;
+          border: 1px solid rgba(59, 130, 246, 0.2);
+        }
+        
+        .help-text strong {
+          color: #dbeafe;
+        }
+        
+        .help-text ul {
+          margin: 0.5rem 0 0 0;
+          padding-left: 1.5rem;
+        }
+        
+        .help-text li {
+          color: rgba(255, 255, 255, 0.8);
+          margin: 0.25rem 0;
         }
         
         code {

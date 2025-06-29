@@ -35,6 +35,12 @@ Note: Put your description in quotes to ensure it's captured correctly.`)
       let componentType = type;
       let componentDescription = description;
       
+      // If type looks like a description (long text), treat it as custom with description
+      if (componentType && componentType.split(' ').length > 3) {
+        componentDescription = componentType;
+        componentType = 'custom';
+      }
+      
       if (!componentType) {
         const response = await prompts({
           type: 'select',
@@ -59,12 +65,16 @@ Note: Put your description in quotes to ensure it's captured correctly.`)
         }
       }
       
-      // Get description if custom or not provided
-      if (componentType === 'custom' || !componentDescription) {
+      // Get description if not provided or if custom type
+      if (!componentDescription) {
+        const message = componentType === 'custom' 
+          ? 'Describe the component you want to create:'
+          : `Describe the ${componentType} component you want to create:`;
+          
         const response = await prompts({
           type: 'text',
           name: 'description',
-          message: 'Describe the component you want to create:',
+          message,
           validate: (value: string) => value.length > 0 || 'Please provide a description'
         });
         

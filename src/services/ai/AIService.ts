@@ -118,16 +118,27 @@ export class AIService {
     const cloudModel = this.config.get('ai.openrouter.model') || 'meta-llama/llama-3.2-3b-instruct:free';
 
     try {
+      // Enhanced prompt for cloud models to ensure code-only output
+      const enhancedPrompt = `${options.prompt}
+
+CRITICAL INSTRUCTIONS:
+1. Output ONLY the JavaScript code inside a code block
+2. Do NOT include ANY explanatory text before or after the code
+3. Start your response with \`\`\`javascript
+4. End your response with \`\`\`
+5. The code must be a complete, working web component
+6. Include customElements.define() at the end`;
+
       const completion = await this.openai.chat.completions.create({
         model: cloudModel,
         messages: [
           {
             role: 'system',
-            content: 'You are an expert web component developer specializing in creating accessible, performant WordPress components.'
+            content: 'You are a code generation AI. You output ONLY code without any explanations, descriptions, or commentary. When asked to generate a web component, you respond with ONLY the JavaScript code inside a markdown code block. Never include text outside the code block.'
           },
           {
             role: 'user',
-            content: options.prompt
+            content: enhancedPrompt
           }
         ],
         temperature: options.temperature || 0.7,
