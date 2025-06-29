@@ -18,10 +18,10 @@ GEMS is a blazing-fast CLI tool for rapid prototyping of web components for Word
 - **🎨 Interactive Mode** - User-friendly CLI with visual menus
 
 ### Coming Soon
-- **🎤 Voice Input** - Speak your ideas into existence with local Whisper WASM
 - **📸 Screenshot to Component** - Turn any design into code instantly
 - **🔄 Multi-Framework Output** - Export to React, Vue, or vanilla JS
 - **🧪 Visual Regression Testing** - Built-in testing for your components
+- **🎤 Voice Input** - Speak your ideas into existence with local Whisper WASM
 
 ## 🚀 Quick Start
 
@@ -110,7 +110,7 @@ Each SHARD maintains the original component's structure while applying your requ
 ### Basic Component Generation
 ```bash
 # Generate a hero section
-gems create hero --brand "TechCorp" --style "modern"
+gems create hero --brand "Bun" --style "cute"
 
 # Generate a pricing table
 gems create pricing --columns 3 --currency USD
@@ -134,7 +134,7 @@ gems
 ### Configuration
 ```bash
 # Set up LM Studio endpoint
-gems config set ai.local.endpoint "http://10.0.0.237:1234"
+gems config set ai.local.endpoint "http://10.0.0.###:1234"
 
 # Configure OpenRouter
 gems config set ai.openrouter.key "your-api-key"
@@ -193,22 +193,9 @@ bun run typecheck
 bun run build
 ```
 
-## 📚 Documentation
-
-- [Getting Started](./docs/getting-started.md)
-- [CLI Reference](./docs/cli-reference.md)
-- [Component Guidelines](./docs/components.md)
-- [AI Integration](./docs/ai-integration.md)
-- [WordPress Integration](./docs/wordpress.md)
-- [Contributing](./CONTRIBUTING.md)
-
-## 🤝 Contributing
-
-We love contributions! Please see our [Contributing Guide](./CONTRIBUTING.md) for details.
-
 ## 📄 License
 
-MIT © [Your Name]
+MIT © John Farmer
 
 ## 🗺️ Roadmap
 
@@ -222,11 +209,11 @@ MIT © [Your Name]
 - **SHARDS versioning system** (NEW!)
 
 ### 🚧 In Progress
-- Voice input support
 - Screenshot to component
 - Multi-framework output
 - Visual regression testing
-- Component marketplace
+- Voice input support
+
 
 ## 🙏 Acknowledgments
 
@@ -236,4 +223,4 @@ MIT © [Your Name]
 
 ---
 
-<p align="center">Made with ❤️ and ☕ by developers, for developers</p>
+<p align="center">Made by [John](https://github.com/johnafarmer) & [Claude](https://anthropic.com)</p>
