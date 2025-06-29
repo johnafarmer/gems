@@ -244,6 +244,144 @@ export class PreviewServer {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Failed to load config' }));
           });
+        } else if (pathname === '/api/create-gem' && req.method === 'POST') {
+          // Handle creating a new GEM
+          let body = '';
+          req.on('data', chunk => body += chunk);
+          req.on('end', async () => {
+            try {
+              const { type, description } = JSON.parse(body);
+              
+              // Use the component generator to create a new component
+              const { ComponentGenerator } = await import('../generators/ComponentGenerator.js');
+              const { ConfigManager } = await import('../config/ConfigManager.js');
+              const { AIService } = await import('../services/ai/AIService.js');
+              
+              const config = new ConfigManager();
+              const aiService = new AIService(config);
+              const generator = new ComponentGenerator(aiService);
+              
+              const result = await generator.generate({
+                type: type === 'custom' ? undefined : type,
+                description
+              });
+              
+              // Get the HTML filename from the generated files
+              const htmlFile = result.files.find(f => f.path.endsWith('.html'));
+              const filename = htmlFile ? htmlFile.path.split('/').pop() : null;
+              
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ 
+                success: true,
+                filename: filename || 'unknown.html',
+                message: 'Component created successfully'
+              }));
+            } catch (error) {
+              console.error('Create GEM error:', error);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+            }
+          });
+        } else if (pathname === '/api/check-endpoints' && req.method === 'GET') {
+          // Check availability of AI endpoints
+          (async () => {
+            try {
+              const localEndpoint = 'http://localhost:1234';
+              const networkEndpoint = process.env.LM_STUDIO_NETWORK_ENDPOINT || 'http://10.0.0.237:1234';
+              
+              const checkEndpoint = async (url: string): Promise<boolean> => {
+                try {
+                  const response = await fetch(`${url}/v1/models`, {
+                    signal: AbortSignal.timeout(2000)
+                  });
+                  return response.ok;
+                } catch {
+                  return false;
+                }
+              };
+              
+              const [localAvailable, networkAvailable] = await Promise.all([
+                checkEndpoint(localEndpoint),
+                checkEndpoint(networkEndpoint)
+              ]);
+              
+              const { ConfigManager } = await import('../config/ConfigManager.js');
+              const config = new ConfigManager();
+              const openRouterAvailable = !!config.get('ai.openrouter.key');
+              
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                localAvailable: localAvailable || networkAvailable,
+                networkAvailable,
+                openRouterAvailable
+              }));
+            } catch (error) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+            }
+          })();
+        } else if (pathname === '/api/get-models' && req.method === 'GET') {
+          // Get available OpenRouter models
+          (async () => {
+            try {
+              const { ConfigManager } = await import('../config/ConfigManager.js');
+              const config = new ConfigManager();
+              const apiKey = config.get('ai.openrouter.key');
+              
+              if (!apiKey) {
+                throw new Error('OpenRouter API key not configured');
+              }
+              
+              // Return a curated list of popular models
+              const models = [
+                { id: 'anthropic/claude-sonnet-4', name: '🚀 Claude Sonnet 4' },
+                { id: 'openai/gpt-4o', name: '⚡ GPT-4o' },
+                { id: 'openai/o3-mini', name: '✨ o3-mini' },
+                { id: 'google/gemini-2.5-flash', name: '🏃 Gemini 2.5 Flash' },
+                { id: 'google/gemini-2.5-pro', name: '🧠 Gemini 2.5 Pro' },
+                { id: 'anthropic/claude-3.5-sonnet', name: '💬 Claude 3.5 Sonnet' },
+                { id: 'anthropic/claude-3.7-sonnet', name: '🎯 Claude 3.7 Sonnet' },
+                { id: 'meta-llama/llama-3-70b-instruct', name: '🦙 Llama 3 70B' }
+              ];
+              
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(models));
+            } catch (error) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+            }
+          })();
+        } else if (pathname === '/api/update-config' && req.method === 'POST') {
+          // Update configuration
+          let body = '';
+          req.on('data', chunk => body += chunk);
+          req.on('end', async () => {
+            try {
+              const { defaultModel, localEndpoint, cloudModel } = JSON.parse(body);
+              
+              const { ConfigManager } = await import('../config/ConfigManager.js');
+              const config = new ConfigManager();
+              
+              // Update settings
+              if (defaultModel) {
+                config.set('ai.defaultModel', defaultModel);
+              }
+              
+              if (localEndpoint) {
+                config.set('ai.local.endpoint', localEndpoint);
+              }
+              
+              if (cloudModel) {
+                config.set('ai.openrouter.model', cloudModel);
+              }
+              
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: true }));
+            } catch (error) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+            }
+          });
         } else if (pathname === '/api/gem-versions' && req.method === 'GET') {
           // Get all versions of a gem
           const gemId = parsedUrl.searchParams.get('gemId');
@@ -447,7 +585,7 @@ export class PreviewServer {
     }
     
     body {
-      font-family: 'OpenDyslexic', system-ui, -apple-system, sans-serif;
+      font-family: 'OpenDyslexic Nerd Font', 'OpenDyslexicNerdFont', 'OpenDyslexic', system-ui, -apple-system, sans-serif;
       margin: 0;
       padding: 0;
       background: #000;
@@ -528,6 +666,52 @@ export class PreviewServer {
       font-size: 0.875rem;
       opacity: 0.8;
       margin-top: 0.5rem;
+    }
+    
+    .header-actions {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+    
+    .create-gem-btn {
+      flex: 1;
+      padding: 0.75rem 1rem;
+      background: linear-gradient(135deg, rgba(147, 51, 234, 0.8), rgba(103, 126, 234, 0.8));
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: white;
+      border-radius: 8px;
+      cursor: pointer;
+      font-family: 'OpenDyslexic Nerd Font', 'OpenDyslexicNerdFont', 'OpenDyslexic', system-ui, -apple-system, sans-serif;
+      font-weight: 700;
+      transition: all 0.3s ease;
+      font-size: 0.875rem;
+    }
+    
+    .create-gem-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(147, 51, 234, 0.4);
+    }
+    
+    .settings-btn {
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: white;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+    }
+    
+    .settings-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+      transform: rotate(45deg);
     }
     
     .file-list {
@@ -653,7 +837,7 @@ export class PreviewServer {
       background: rgba(255, 255, 255, 0.1);
       padding: 0.25rem 0.5rem;
       border-radius: 4px;
-      font-family: 'OpenDyslexic Mono', monospace;
+      font-family: 'OpenDyslexic Nerd Font Mono', 'OpenDyslexicNerdFontMono', 'OpenDyslexic Mono', monospace;
     }
     
     /* Action buttons */
@@ -677,7 +861,7 @@ export class PreviewServer {
       font-size: 0.75rem;
       cursor: pointer;
       transition: all 0.2s ease;
-      font-family: 'OpenDyslexic', system-ui, -apple-system, sans-serif;
+      font-family: 'OpenDyslexic Nerd Font', 'OpenDyslexicNerdFont', 'OpenDyslexic', system-ui, -apple-system, sans-serif;
       position: relative;
       z-index: 10;
       pointer-events: auto;
@@ -764,7 +948,7 @@ export class PreviewServer {
       color: white;
       cursor: pointer;
       transition: all 0.2s ease;
-      font-family: 'OpenDyslexic', system-ui, -apple-system, sans-serif;
+      font-family: 'OpenDyslexic Nerd Font', 'OpenDyslexicNerdFont', 'OpenDyslexic', system-ui, -apple-system, sans-serif;
     }
     
     .modal-buttons button:hover {
@@ -804,7 +988,7 @@ export class PreviewServer {
       color: white;
       border-radius: 12px;
       cursor: pointer;
-      font-family: 'OpenDyslexic', system-ui, -apple-system, sans-serif;
+      font-family: 'OpenDyslexic Nerd Font', 'OpenDyslexicNerdFont', 'OpenDyslexic', system-ui, -apple-system, sans-serif;
       font-weight: 700;
       transition: all 0.3s ease;
       box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
@@ -876,8 +1060,16 @@ export class PreviewServer {
   <div class="layout">
     <aside class="sidebar">
       <div class="sidebar-header">
-        <h1 class="logo">GEMS</h1>
+        <h1 class="logo">💎 GEMS</h1>
         <p class="tagline">Generative Element Management System</p>
+        <div class="header-actions">
+          <button class="create-gem-btn" onclick="showCreateGemModal()">
+            ✨ Create New GEM
+          </button>
+          <button class="settings-btn" onclick="showSettingsModal()" title="Settings">
+            ⚙️
+          </button>
+        </div>
       </div>
       <div class="file-list">
         ${componentFiles.length > 0 ? fileList.map((file, index) => `
@@ -975,7 +1167,7 @@ export class PreviewServer {
         style="width: 100%; min-height: 100px; margin-top: 1rem; padding: 0.75rem; 
                border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); 
                background: rgba(255, 255, 255, 0.1); color: white; resize: vertical;
-               font-family: 'OpenDyslexic', system-ui, -apple-system, sans-serif;"
+               font-family: 'OpenDyslexic Nerd Font', 'OpenDyslexicNerdFont', 'OpenDyslexic', system-ui, -apple-system, sans-serif;"
         placeholder="e.g., Make it more colorful, Add animations, Change the layout..."></textarea>
       <div class="modal-buttons">
         <button onclick="cancelShard()">Cancel</button>
@@ -1006,6 +1198,63 @@ export class PreviewServer {
   <button class="new-shard-btn ${selectedComponent ? 'visible' : ''}" onclick="showShardModal()">
     💎 New SHARD
   </button>
+  
+  <!-- Create GEM modal -->
+  <div class="modal" id="createGemModal">
+    <div class="modal-content" style="max-width: 600px;">
+      <h3 style="margin-top: 0;">✨ Create New GEM</h3>
+      
+      <div style="margin: 1.5rem 0;">
+        <label style="display: block; margin-bottom: 0.5rem; font-size: 0.875rem; opacity: 0.8;">Component Type:</label>
+        <select id="componentType" 
+          style="width: 100%; padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); 
+                 background: rgba(255, 255, 255, 0.1); color: white; font-family: inherit;">
+          <option value="hero">🏔️ Hero Section</option>
+          <option value="cta">🎯 Call-to-Action</option>
+          <option value="features">✨ Features Grid</option>
+          <option value="testimonial">💬 Testimonial</option>
+          <option value="pricing">💳 Pricing Table</option>
+          <option value="faq">❓ FAQ Section</option>
+          <option value="custom" selected>✏️ Custom Component</option>
+        </select>
+      </div>
+      
+      <div style="margin: 1.5rem 0;">
+        <label style="display: block; margin-bottom: 0.5rem; font-size: 0.875rem; opacity: 0.8;">Description:</label>
+        <textarea id="gemDescription" 
+          style="width: 100%; min-height: 120px; padding: 0.75rem; 
+                 border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); 
+                 background: rgba(255, 255, 255, 0.1); color: white; resize: vertical;
+                 font-family: 'OpenDyslexic Nerd Font', 'OpenDyslexicNerdFont', 'OpenDyslexic', system-ui, -apple-system, sans-serif;"
+          placeholder="Describe the component you want to create..."></textarea>
+      </div>
+      
+      <div class="modal-buttons">
+        <button onclick="cancelCreateGem()">Cancel</button>
+        <button class="confirm" onclick="createGem()" style="background: rgba(147, 51, 234, 0.5); border-color: rgba(147, 51, 234, 0.6);">Create GEM</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Settings modal -->
+  <div class="modal" id="settingsModal">
+    <div class="modal-content" style="max-width: 700px;">
+      <h3 style="margin-top: 0;">⚙️ Settings</h3>
+      
+      <div id="settingsContent" style="margin: 1.5rem 0;">
+        <!-- Settings content will be populated dynamically -->
+        <div style="text-align: center; padding: 2rem;">
+          <div style="animation: spin 1s linear infinite; display: inline-block;">⚙️</div>
+          <p style="margin-top: 1rem; opacity: 0.7;">Loading settings...</p>
+        </div>
+      </div>
+      
+      <div class="modal-buttons">
+        <button onclick="cancelSettings()">Cancel</button>
+        <button class="confirm" onclick="saveSettings()" style="background: rgba(103, 126, 234, 0.5); border-color: rgba(103, 126, 234, 0.6);">Save Settings</button>
+      </div>
+    </div>
+  </div>
   
   
   <script>
@@ -1453,6 +1702,200 @@ export class PreviewServer {
       }
     }
     
+    // Create GEM functions
+    function showCreateGemModal() {
+      document.getElementById('createGemModal').classList.add('show');
+      document.getElementById('gemDescription').focus();
+    }
+    
+    function cancelCreateGem() {
+      document.getElementById('createGemModal').classList.remove('show');
+      document.getElementById('componentType').value = 'custom';
+      document.getElementById('gemDescription').value = '';
+    }
+    
+    async function createGem() {
+      const type = document.getElementById('componentType').value;
+      const description = document.getElementById('gemDescription').value.trim();
+      
+      if (!description) {
+        alert('Please provide a description for the component');
+        return;
+      }
+      
+      // Hide create modal and show processing modal
+      document.getElementById('createGemModal').classList.remove('show');
+      document.getElementById('processingModal').classList.add('show');
+      document.getElementById('processingStatus').textContent = 'Creating your new GEM...';
+      
+      try {
+        const response = await fetch('/api/create-gem', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, description })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to create GEM');
+        }
+        
+        const data = await response.json();
+        
+        // Hide processing modal
+        document.getElementById('processingModal').classList.remove('show');
+        
+        // Reset form
+        cancelCreateGem();
+        
+        // Reload to show new component
+        window.location.href = '/?component=' + encodeURIComponent(data.filename);
+      } catch (error) {
+        document.getElementById('processingModal').classList.remove('show');
+        console.error('Failed to create GEM:', error);
+        alert('Failed to create new GEM: ' + error.message);
+      }
+    }
+    
+    // Settings functions
+    async function showSettingsModal() {
+      document.getElementById('settingsModal').classList.add('show');
+      
+      // Load current settings
+      try {
+        const [configRes, statusRes] = await Promise.all([
+          fetch('/api/current-config'),
+          fetch('/api/check-endpoints')
+        ]);
+        
+        const config = await configRes.json();
+        const status = await statusRes.json();
+        
+        // Populate settings content
+        const settingsContent = document.getElementById('settingsContent');
+        settingsContent.innerHTML = \`
+          <div class="settings-tabs">
+            <div class="settings-section">
+              <h4 style="margin-top: 0; margin-bottom: 1rem;">AI Model Configuration</h4>
+              
+              <div style="margin-bottom: 1.5rem;">
+                <label style="display: block; margin-bottom: 0.5rem; font-size: 0.875rem; opacity: 0.8;">Model Type:</label>
+                <div style="display: flex; gap: 1rem;">
+                  <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                    <input type="radio" name="modelType" value="local" \${config.defaultModel === 'local' ? 'checked' : ''}>
+                    <span>🖥️ Local/Network LM Studio \${status.localAvailable ? '<span style="color: #10b981;">(Online)</span>' : '<span style="color: #ef4444;">(Offline)</span>'}</span>
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                    <input type="radio" name="modelType" value="cloud" \${config.defaultModel === 'cloud' ? 'checked' : ''}>
+                    <span>☁️ OpenRouter \${status.openRouterAvailable ? '<span style="color: #10b981;">(Available)</span>' : '<span style="color: #ef4444;">(No API Key)</span>'}</span>
+                  </label>
+                </div>
+              </div>
+              
+              <div id="localSettings" style="\${config.defaultModel === 'local' ? '' : 'display: none;'}">
+                <label style="display: block; margin-bottom: 0.5rem; font-size: 0.875rem; opacity: 0.8;">Local Endpoint:</label>
+                <input type="text" id="localEndpoint" value="\${config.localEndpoint || 'http://10.0.0.237:1234'}"
+                  style="width: 100%; padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); 
+                         background: rgba(255, 255, 255, 0.1); color: white; font-family: inherit;">
+              </div>
+              
+              <div id="cloudSettings" style="\${config.defaultModel === 'cloud' ? '' : 'display: none;'}">
+                <label style="display: block; margin-bottom: 0.5rem; font-size: 0.875rem; opacity: 0.8;">OpenRouter Model:</label>
+                <select id="cloudModel" 
+                  style="width: 100%; padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); 
+                         background: rgba(255, 255, 255, 0.1); color: white; font-family: inherit;">
+                  <option value="">Loading models...</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          
+          <style>
+            .settings-section {
+              background: rgba(255, 255, 255, 0.05);
+              padding: 1.5rem;
+              border-radius: 12px;
+              border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+          </style>
+        \`;
+        
+        // Add event listener for model type change
+        document.querySelectorAll('input[name="modelType"]').forEach(radio => {
+          radio.addEventListener('change', (e) => {
+            document.getElementById('localSettings').style.display = e.target.value === 'local' ? 'block' : 'none';
+            document.getElementById('cloudSettings').style.display = e.target.value === 'cloud' ? 'block' : 'none';
+          });
+        });
+        
+        // Load OpenRouter models if cloud is selected
+        if (config.defaultModel === 'cloud' || status.openRouterAvailable) {
+          loadOpenRouterModels(config.cloudModel);
+        }
+        
+      } catch (error) {
+        console.error('Failed to load settings:', error);
+        document.getElementById('settingsContent').innerHTML = '<p style="color: #ef4444;">Failed to load settings</p>';
+      }
+    }
+    
+    async function loadOpenRouterModels(currentModel) {
+      try {
+        const response = await fetch('/api/get-models');
+        const models = await response.json();
+        
+        const select = document.getElementById('cloudModel');
+        select.innerHTML = models.map(model => 
+          \`<option value="\${model.id}" \${model.id === currentModel ? 'selected' : ''}>\${model.name}</option>\`
+        ).join('');
+      } catch (error) {
+        console.error('Failed to load models:', error);
+        document.getElementById('cloudModel').innerHTML = '<option value="">Failed to load models</option>';
+      }
+    }
+    
+    function cancelSettings() {
+      document.getElementById('settingsModal').classList.remove('show');
+    }
+    
+    async function saveSettings() {
+      const modelType = document.querySelector('input[name="modelType"]:checked')?.value;
+      const localEndpoint = document.getElementById('localEndpoint')?.value;
+      const cloudModel = document.getElementById('cloudModel')?.value;
+      
+      try {
+        const response = await fetch('/api/update-config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            defaultModel: modelType,
+            localEndpoint,
+            cloudModel
+          })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to save settings');
+        }
+        
+        // Close modal
+        cancelSettings();
+        
+        // Show success message
+        const successDiv = document.createElement('div');
+        successDiv.style.cssText = 'position: fixed; top: 2rem; right: 2rem; background: rgba(16, 185, 129, 0.9); color: white; padding: 1rem 1.5rem; border-radius: 8px; z-index: 3000;';
+        successDiv.textContent = '✅ Settings saved successfully!';
+        document.body.appendChild(successDiv);
+        
+        setTimeout(() => {
+          successDiv.remove();
+        }, 3000);
+        
+      } catch (error) {
+        console.error('Failed to save settings:', error);
+        alert('Failed to save settings: ' + error.message);
+      }
+    }
+    
     // Handle browser back/forward
     window.addEventListener('popstate', () => {
       const urlParams = new URLSearchParams(window.location.search);
@@ -1472,6 +1915,18 @@ export class PreviewServer {
     document.getElementById('shardModal').addEventListener('click', (e) => {
       if (e.target.id === 'shardModal') {
         cancelShard();
+      }
+    });
+    
+    document.getElementById('createGemModal').addEventListener('click', (e) => {
+      if (e.target.id === 'createGemModal') {
+        cancelCreateGem();
+      }
+    });
+    
+    document.getElementById('settingsModal').addEventListener('click', (e) => {
+      if (e.target.id === 'settingsModal') {
+        cancelSettings();
       }
     });
     

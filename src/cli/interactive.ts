@@ -24,9 +24,9 @@ export async function interactiveMode(): Promise<void> {
           description: 'Generate a new AI-powered component'
         },
         {
-          title: '👁️  Preview Components',
+          title: '🌐 Start GEMS Browser',
           value: 'preview',
-          description: 'View your components in the browser'
+          description: 'Start the GEMS browser and open the interface'
         },
         {
           title: '⚙️  Configuration',
