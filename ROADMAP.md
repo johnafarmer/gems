@@ -15,24 +15,15 @@
 - [x] Rename components
 - [x] Delete components with confirmation
 
-### Phase 2: Voice & Visual Input
+### Phase 2: SHARD Timeline 🔥
+- [x] Browse timeline of component changes
+- [ ] Track component edit history
+- [ ] Diff view between shards
+
+### Phase 3: Voice & Visual Input
 - [ ] Voice input for component descriptions
 - [ ] Screenshot to component conversion
 - [ ] Visual component editor
-
-### Phase 3: Component Evolution Timeline 🔥
-- [ ] Track component edit history
-- [ ] Browse timeline of component changes
-- [ ] Diff view between versions
-- [ ] Revert to previous versions
-- [ ] Branch components into variations
-
-### Phase 4: Advanced Features
-- [ ] Component marketplace
-- [ ] Team collaboration
-- [ ] WordPress plugin integration
-- [ ] Component analytics
-- [ ] A/B testing framework
 
 ## Technical Improvements
 - [ ] Better minification for production code
@@ -45,4 +36,3 @@
 - [ ] Share components publicly
 - [ ] Fork and customize shared components
 - [ ] Component ratings and reviews
-- [ ] Discussion threads
