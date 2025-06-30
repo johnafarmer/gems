@@ -209,11 +209,36 @@ export class PreviewServer {
               
               const originalJs = readFileSync(originalJsPath, 'utf-8');
               
+              // Use AI service to generate modified version
+              const { ConfigManager } = await import('../config/ConfigManager.js');
+              const { AIService } = await import('../services/ai/AIService.js');
+              const { StylePresetService } = await import('../services/StylePresetService.js');
+              const config = new ConfigManager();
+              const aiService = new AIService(config);
+              const styleService = new StylePresetService(config);
+              
+              // Get active style content if styles are enabled
+              const styleContent = await styleService.getActiveStyleContent();
+              
               // Create AI prompt for modification
-              const modificationPrompt = `Given this existing web component code, modify it according to this request: "${prompt}"
+              let modificationPrompt = `Given this existing web component code, modify it according to this request: "${prompt}"
               
               Original component code:
-              ${originalJs}
+              ${originalJs}`;
+              
+              // Include style guidelines if available
+              if (styleContent) {
+                modificationPrompt += `
+              
+              Style Guidelines to follow:
+              \`\`\`
+              ${styleContent}
+              \`\`\`
+              
+              Apply these style guidelines to the modified component.`;
+              }
+              
+              modificationPrompt += `
               
               Important: 
               - Maintain the same component structure and element name
@@ -221,12 +246,6 @@ export class PreviewServer {
               - Keep all existing functionality unless specifically asked to change
               
               CRITICAL: Return ONLY the modified JavaScript code. Do not include any explanations, descriptions, or text before or after the code. The response should start with "class" and end with "customElements.define". Output the code in a JavaScript code block using \`\`\`javascript\`\`\`.`;
-              
-              // Use AI service to generate modified version
-              const { ConfigManager } = await import('../config/ConfigManager.js');
-              const { AIService } = await import('../services/ai/AIService.js');
-              const config = new ConfigManager();
-              const aiService = new AIService(config);
               
               const result = await aiService.generateWithSource({
                 prompt: modificationPrompt,
@@ -368,14 +387,20 @@ export class PreviewServer {
               const { ComponentGenerator } = await import('../generators/ComponentGenerator.js');
               const { ConfigManager } = await import('../config/ConfigManager.js');
               const { AIService } = await import('../services/ai/AIService.js');
+              const { StylePresetService } = await import('../services/StylePresetService.js');
               
               const config = new ConfigManager();
               const aiService = new AIService(config);
               const generator = new ComponentGenerator(aiService);
+              const styleService = new StylePresetService(config);
+              
+              // Get active style content if styles are enabled
+              const styleContent = await styleService.getActiveStyleContent();
               
               const result = await generator.generate({
                 type: type === 'custom' ? 'custom' : type,
-                description
+                description,
+                styleContent: styleContent || undefined
               });
               
               // Get the HTML filename from the generated files
@@ -526,6 +551,139 @@ export class PreviewServer {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Missing gemId parameter' }));
           }
+        } else if (pathname === '/api/styles' && req.method === 'GET') {
+          // Get all style presets
+          (async () => {
+            try {
+              const { ConfigManager } = await import('../config/ConfigManager.js');
+              const { StylePresetService } = await import('../services/StylePresetService.js');
+              
+              const config = new ConfigManager();
+              const styleService = new StylePresetService(config);
+              
+              const styles = await styleService.listStyles();
+              const enabled = styleService.isStylesEnabled();
+              const activePreset = config.get('styles.activePreset');
+              
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ styles, enabled, activePreset }));
+            } catch (error) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+            }
+          })();
+        } else if (pathname === '/api/styles' && req.method === 'POST') {
+          // Create new style preset
+          let body = '';
+          req.on('data', chunk => body += chunk);
+          req.on('end', async () => {
+            try {
+              const { name, content } = JSON.parse(body);
+              
+              if (!name || !content) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Name and content are required' }));
+                return;
+              }
+              
+              const { ConfigManager } = await import('../config/ConfigManager.js');
+              const { StylePresetService } = await import('../services/StylePresetService.js');
+              
+              const config = new ConfigManager();
+              const styleService = new StylePresetService(config);
+              
+              const filename = await styleService.createStyle(name, content);
+              
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: true, filename }));
+            } catch (error) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+            }
+          });
+        } else if (pathname.startsWith('/api/styles/') && req.method === 'GET') {
+          // Get specific style content
+          const filename = pathname.substring('/api/styles/'.length);
+          
+          (async () => {
+            try {
+              const { ConfigManager } = await import('../config/ConfigManager.js');
+              const { StylePresetService } = await import('../services/StylePresetService.js');
+              
+              const config = new ConfigManager();
+              const styleService = new StylePresetService(config);
+              
+              const content = await styleService.getStyleContent(filename);
+              
+              if (!content) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Style not found' }));
+                return;
+              }
+              
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ content }));
+            } catch (error) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+            }
+          })();
+        } else if (pathname.startsWith('/api/styles/') && req.method === 'DELETE') {
+          // Delete style preset
+          const filename = pathname.substring('/api/styles/'.length);
+          
+          (async () => {
+            try {
+              const { ConfigManager } = await import('../config/ConfigManager.js');
+              const { StylePresetService } = await import('../services/StylePresetService.js');
+              
+              const config = new ConfigManager();
+              const styleService = new StylePresetService(config);
+              
+              const success = await styleService.deleteStyle(filename);
+              
+              if (!success) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Style not found or cannot be deleted' }));
+                return;
+              }
+              
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: true }));
+            } catch (error) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+            }
+          })();
+        } else if (pathname === '/api/styles/active' && req.method === 'POST') {
+          // Set active style or toggle styles
+          let body = '';
+          req.on('data', chunk => body += chunk);
+          req.on('end', async () => {
+            try {
+              const { filename, enabled } = JSON.parse(body);
+              
+              const { ConfigManager } = await import('../config/ConfigManager.js');
+              const { StylePresetService } = await import('../services/StylePresetService.js');
+              
+              const config = new ConfigManager();
+              const styleService = new StylePresetService(config);
+              
+              if (enabled !== undefined) {
+                await styleService.setStylesEnabled(enabled);
+              }
+              
+              if (filename !== undefined) {
+                await styleService.setActiveStyle(filename);
+              }
+              
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: true }));
+            } catch (error) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+            }
+          });
         } else if (pathname.startsWith('/generated/')) {
           // Serve files from generated directory
           const filePath = join(process.cwd(), pathname.slice(1));
@@ -1520,6 +1678,67 @@ export class PreviewServer {
     </div>
   </div>
   
+  <!-- Create Style modal -->
+  <div class="modal" id="createStyleModal">
+    <div class="modal-content" style="max-width: 600px;">
+      <h3 style="margin-top: 0;">✨ Create Style Preset</h3>
+      
+      <div style="margin: 1.5rem 0;">
+        <label style="display: block; margin-bottom: 0.5rem; font-size: 0.875rem; opacity: 0.8;">Style Name:</label>
+        <input type="text" id="styleName" 
+          style="width: 100%; padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); 
+                 background: rgba(255, 255, 255, 0.1); color: white; font-family: inherit;"
+          placeholder="e.g., Modern Minimalist, Vibrant Playful">
+      </div>
+      
+      <div style="margin: 1.5rem 0;">
+        <label style="display: block; margin-bottom: 0.5rem; font-size: 0.875rem; opacity: 0.8;">Style Guidelines:</label>
+        <textarea id="styleContent" 
+          style="width: 100%; min-height: 300px; padding: 0.75rem; 
+                 border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); 
+                 background: rgba(255, 255, 255, 0.1); color: white; resize: vertical;
+                 font-family: 'OpenDyslexic Nerd Font', 'OpenDyslexicNerdFont', 'OpenDyslexic', system-ui, -apple-system, sans-serif;"
+          placeholder="Define your style guidelines here. Include:&#10;&#10;• Color palette (primary, secondary, accent colors)&#10;• Typography (fonts, sizes, weights)&#10;• Visual style (modern, classic, playful, professional)&#10;• Layout preferences (spacing, borders, shadows)&#10;• Any specific design patterns or components&#10;&#10;The more detail you provide, the better the generated components will match your style!"></textarea>
+      </div>
+      
+      <div class="modal-buttons">
+        <button onclick="cancelCreateStyle()">Cancel</button>
+        <button class="confirm" onclick="createStyle()" style="background: rgba(147, 51, 234, 0.5); border-color: rgba(147, 51, 234, 0.6);">Create Style</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Edit Style modal -->
+  <div class="modal" id="editStyleModal">
+    <div class="modal-content" style="max-width: 600px;">
+      <h3 style="margin-top: 0;">✏️ Edit Style Preset</h3>
+      
+      <div style="margin: 1.5rem 0;">
+        <label style="display: block; margin-bottom: 0.5rem; font-size: 0.875rem; opacity: 0.8;">Style Name:</label>
+        <input type="text" id="editStyleName" 
+          style="width: 100%; padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); 
+                 background: rgba(255, 255, 255, 0.1); color: white; font-family: inherit;" disabled>
+        <p style="font-size: 0.75rem; opacity: 0.6; margin-top: 0.5rem;">
+          Note: Style name cannot be changed. Create a new style to use a different name.
+        </p>
+      </div>
+      
+      <div style="margin: 1.5rem 0;">
+        <label style="display: block; margin-bottom: 0.5rem; font-size: 0.875rem; opacity: 0.8;">Style Guidelines:</label>
+        <textarea id="editStyleContent" 
+          style="width: 100%; min-height: 300px; padding: 0.75rem; 
+                 border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); 
+                 background: rgba(255, 255, 255, 0.1); color: white; resize: vertical;
+                 font-family: 'OpenDyslexic Nerd Font', 'OpenDyslexicNerdFont', 'OpenDyslexic', system-ui, -apple-system, sans-serif;"></textarea>
+      </div>
+      
+      <div class="modal-buttons">
+        <button onclick="cancelEditStyle()">Cancel</button>
+        <button class="confirm" onclick="saveEditedStyle()" style="background: rgba(103, 126, 234, 0.5); border-color: rgba(103, 126, 234, 0.6);">Save Changes</button>
+      </div>
+    </div>
+  </div>
+  
   
   <script>
     // Define functions in global scope first
@@ -2289,6 +2508,40 @@ export class PreviewServer {
                 </select>
               </div>
             </div>
+            
+            <div class="settings-section" style="margin-top: 1.5rem;">
+              <h4 style="margin-top: 0; margin-bottom: 1rem;">Style Presets</h4>
+              
+              <div style="margin-bottom: 1.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" id="stylesEnabled" style="width: 18px; height: 18px;">
+                  <span>Enable style presets for component generation</span>
+                </label>
+              </div>
+              
+              <div id="stylesContent" style="display: none;">
+                <div id="stylesList" style="margin-bottom: 1rem;">
+                  <!-- Styles will be populated here -->
+                </div>
+                
+                <button onclick="showCreateStyleModal()" 
+                  style="padding: 0.75rem 1.5rem; background: rgba(147, 51, 234, 0.5); 
+                         border: 1px solid rgba(147, 51, 234, 0.6); color: white; 
+                         border-radius: 8px; cursor: pointer; transition: all 0.3s;">
+                  ✨ Create New Style
+                </button>
+              </div>
+              
+              <div id="stylesPlaceholder" style="display: none; text-align: center; padding: 2rem;">
+                <p style="opacity: 0.7; margin-bottom: 1rem;">No style presets created yet</p>
+                <button onclick="showCreateStyleModal()" 
+                  style="padding: 0.75rem 1.5rem; background: rgba(147, 51, 234, 0.5); 
+                         border: 1px solid rgba(147, 51, 234, 0.6); color: white; 
+                         border-radius: 8px; cursor: pointer; transition: all 0.3s;">
+                  ✨ Create Your First Style
+                </button>
+              </div>
+            </div>
           </div>
           
           <style>
@@ -2297,6 +2550,76 @@ export class PreviewServer {
               padding: 1.5rem;
               border-radius: 12px;
               border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            
+            .style-item {
+              padding: 1rem;
+              background: rgba(255, 255, 255, 0.05);
+              border: 1px solid rgba(255, 255, 255, 0.1);
+              border-radius: 8px;
+              margin-bottom: 0.75rem;
+              display: flex;
+              align-items: center;
+              gap: 1rem;
+              transition: all 0.3s;
+            }
+            
+            .style-item:hover {
+              background: rgba(255, 255, 255, 0.08);
+              border-color: rgba(255, 255, 255, 0.2);
+            }
+            
+            .style-item.active {
+              border-color: rgba(147, 51, 234, 0.6);
+              background: rgba(147, 51, 234, 0.1);
+            }
+            
+            .style-item input[type="radio"] {
+              width: 18px;
+              height: 18px;
+            }
+            
+            .style-info {
+              flex: 1;
+            }
+            
+            .style-name {
+              font-weight: 600;
+              margin-bottom: 0.25rem;
+            }
+            
+            .style-description {
+              font-size: 0.875rem;
+              opacity: 0.7;
+            }
+            
+            .style-actions {
+              display: flex;
+              gap: 0.5rem;
+            }
+            
+            .style-actions button {
+              padding: 0.25rem 0.5rem;
+              background: rgba(255, 255, 255, 0.1);
+              border: 1px solid rgba(255, 255, 255, 0.2);
+              color: white;
+              border-radius: 4px;
+              cursor: pointer;
+              font-size: 0.75rem;
+              transition: all 0.3s;
+            }
+            
+            .style-actions button:hover {
+              background: rgba(255, 255, 255, 0.2);
+            }
+            
+            .style-actions button.delete {
+              border-color: rgba(239, 68, 68, 0.5);
+            }
+            
+            .style-actions button.delete:hover {
+              background: rgba(239, 68, 68, 0.3);
+              border-color: rgba(239, 68, 68, 0.7);
             }
           </style>
         \`;
@@ -2313,6 +2636,9 @@ export class PreviewServer {
         if (config.defaultModel === 'cloud' || status.openRouterAvailable) {
           loadOpenRouterModels(config.cloudModel);
         }
+        
+        // Load style presets
+        loadStylePresets();
         
       } catch (error) {
         console.error('Failed to load settings:', error);
@@ -2362,8 +2688,11 @@ export class PreviewServer {
       const modelType = document.querySelector('input[name="modelType"]:checked')?.value;
       const localEndpoint = document.getElementById('localEndpoint')?.value;
       const cloudModel = document.getElementById('cloudModel')?.value;
+      const stylesEnabled = document.getElementById('stylesEnabled')?.checked;
+      const activeStyle = document.querySelector('input[name="activeStyle"]:checked')?.value;
       
       try {
+        // Save AI model settings
         const response = await fetch('/api/update-config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2377,6 +2706,16 @@ export class PreviewServer {
         if (!response.ok) {
           throw new Error('Failed to save settings');
         }
+        
+        // Save style settings
+        await fetch('/api/styles/active', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enabled: stylesEnabled,
+            filename: stylesEnabled ? activeStyle : null
+          })
+        });
         
         // Close modal
         cancelSettings();
@@ -2394,6 +2733,246 @@ export class PreviewServer {
       } catch (error) {
         console.error('Failed to save settings:', error);
         alert('Failed to save settings: ' + error.message);
+      }
+    }
+    
+    // Style preset functions
+    async function loadStylePresets() {
+      try {
+        const response = await fetch('/api/styles');
+        const data = await response.json();
+        
+        const stylesEnabled = document.getElementById('stylesEnabled');
+        const stylesContent = document.getElementById('stylesContent');
+        const stylesPlaceholder = document.getElementById('stylesPlaceholder');
+        const stylesList = document.getElementById('stylesList');
+        
+        // Set enabled state
+        stylesEnabled.checked = data.enabled;
+        
+        // Show/hide content based on enabled state
+        if (data.enabled) {
+          if (data.styles.length > 0) {
+            stylesContent.style.display = 'block';
+            stylesPlaceholder.style.display = 'none';
+          } else {
+            stylesContent.style.display = 'none';
+            stylesPlaceholder.style.display = 'block';
+          }
+        } else {
+          stylesContent.style.display = 'none';
+          stylesPlaceholder.style.display = 'none';
+        }
+        
+        // Populate styles list
+        if (data.styles.length > 0) {
+          stylesList.innerHTML = data.styles.map(style => \`
+            <div class="style-item \${style.filename === data.activePreset ? 'active' : ''}">
+              <input type="radio" name="activeStyle" value="\${style.filename}" 
+                \${style.filename === data.activePreset ? 'checked' : ''}>
+              <div class="style-info">
+                <div class="style-name">\${style.name}</div>
+                \${style.description ? \`<div class="style-description">\${style.description}</div>\` : ''}
+              </div>
+              <div class="style-actions">
+                <button onclick="editStyle('\${style.filename}')">Edit</button>
+                <button onclick="deleteStyle('\${style.filename}')" class="delete">Delete</button>
+              </div>
+            </div>
+          \`).join('');
+        }
+        
+        // Add event listener for enabling/disabling styles
+        stylesEnabled.addEventListener('change', (e) => {
+          if (e.target.checked) {
+            if (data.styles.length > 0) {
+              stylesContent.style.display = 'block';
+              stylesPlaceholder.style.display = 'none';
+            } else {
+              stylesContent.style.display = 'none';
+              stylesPlaceholder.style.display = 'block';
+            }
+          } else {
+            stylesContent.style.display = 'none';
+            stylesPlaceholder.style.display = 'none';
+          }
+        });
+        
+      } catch (error) {
+        console.error('Failed to load style presets:', error);
+      }
+    }
+    
+    async function deleteStyle(filename) {
+      if (!confirm('Are you sure you want to delete this style preset?')) {
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/styles/' + encodeURIComponent(filename), {
+          method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to delete style');
+        }
+        
+        // Reload styles
+        loadStylePresets();
+      } catch (error) {
+        console.error('Failed to delete style:', error);
+        alert('Failed to delete style: ' + error.message);
+      }
+    }
+    
+    function showCreateStyleModal() {
+      document.getElementById('createStyleModal').classList.add('show');
+      document.getElementById('styleName').focus();
+    }
+    
+    function cancelCreateStyle() {
+      document.getElementById('createStyleModal').classList.remove('show');
+      document.getElementById('styleName').value = '';
+      document.getElementById('styleContent').value = '';
+    }
+    
+    async function createStyle() {
+      const name = document.getElementById('styleName').value.trim();
+      const content = document.getElementById('styleContent').value.trim();
+      
+      if (!name) {
+        alert('Please provide a name for the style preset');
+        return;
+      }
+      
+      if (!content) {
+        alert('Please provide style guidelines');
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/styles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, content })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to create style');
+        }
+        
+        // Close modal and reload styles
+        cancelCreateStyle();
+        loadStylePresets();
+        
+        // Show success message
+        const successDiv = document.createElement('div');
+        successDiv.style.cssText = 'position: fixed; top: 2rem; right: 2rem; background: rgba(16, 185, 129, 0.9); color: white; padding: 1rem 1.5rem; border-radius: 8px; z-index: 3000;';
+        successDiv.textContent = '✅ Style preset created successfully!';
+        document.body.appendChild(successDiv);
+        
+        setTimeout(() => {
+          successDiv.remove();
+        }, 3000);
+        
+      } catch (error) {
+        console.error('Failed to create style:', error);
+        alert('Failed to create style: ' + error.message);
+      }
+    }
+    
+    let currentEditingStyle = null;
+    
+    async function editStyle(filename) {
+      try {
+        // Fetch the style content
+        const response = await fetch('/api/styles/' + encodeURIComponent(filename));
+        if (!response.ok) {
+          throw new Error('Failed to load style');
+        }
+        
+        const data = await response.json();
+        const content = data.content;
+        
+        // Extract name from content
+        const nameMatch = content.match(/^#\s+(.+)$/m);
+        const name = nameMatch ? nameMatch[1].trim() : filename.replace('.md', '');
+        
+        // Set modal values
+        document.getElementById('editStyleName').value = name;
+        document.getElementById('editStyleContent').value = content;
+        
+        // Store current editing filename
+        currentEditingStyle = filename;
+        
+        // Show modal
+        document.getElementById('editStyleModal').classList.add('show');
+        document.getElementById('editStyleContent').focus();
+        
+      } catch (error) {
+        console.error('Failed to load style for editing:', error);
+        alert('Failed to load style: ' + error.message);
+      }
+    }
+    
+    function cancelEditStyle() {
+      document.getElementById('editStyleModal').classList.remove('show');
+      document.getElementById('editStyleName').value = '';
+      document.getElementById('editStyleContent').value = '';
+      currentEditingStyle = null;
+    }
+    
+    async function saveEditedStyle() {
+      if (!currentEditingStyle) {
+        alert('No style selected for editing');
+        return;
+      }
+      
+      const content = document.getElementById('editStyleContent').value.trim();
+      
+      if (!content) {
+        alert('Please provide style guidelines');
+        return;
+      }
+      
+      try {
+        // First delete the old file
+        await fetch('/api/styles/' + encodeURIComponent(currentEditingStyle), {
+          method: 'DELETE'
+        });
+        
+        // Extract name from content or use filename
+        const nameMatch = content.match(/^#\s+(.+)$/m);
+        const name = nameMatch ? nameMatch[1].trim() : currentEditingStyle.replace('.md', '');
+        
+        // Create new file with same name
+        const response = await fetch('/api/styles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, content })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to save style');
+        }
+        
+        // Close modal and reload styles
+        cancelEditStyle();
+        loadStylePresets();
+        
+        // Show success message
+        const successDiv = document.createElement('div');
+        successDiv.style.cssText = 'position: fixed; top: 2rem; right: 2rem; background: rgba(16, 185, 129, 0.9); color: white; padding: 1rem 1.5rem; border-radius: 8px; z-index: 3000;';
+        successDiv.textContent = '✅ Style updated successfully!';
+        document.body.appendChild(successDiv);
+        
+        setTimeout(() => {
+          successDiv.remove();
+        }, 3000);
+        
+      } catch (error) {
+        console.error('Failed to save edited style:', error);
+        alert('Failed to save style: ' + error.message);
       }
     }
     
@@ -2428,6 +3007,18 @@ export class PreviewServer {
     document.getElementById('settingsModal').addEventListener('click', (e) => {
       if (e.target.id === 'settingsModal') {
         cancelSettings();
+      }
+    });
+    
+    document.getElementById('createStyleModal').addEventListener('click', (e) => {
+      if (e.target.id === 'createStyleModal') {
+        cancelCreateStyle();
+      }
+    });
+    
+    document.getElementById('editStyleModal').addEventListener('click', (e) => {
+      if (e.target.id === 'editStyleModal') {
+        cancelEditStyle();
       }
     });
     

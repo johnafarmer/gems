@@ -29,6 +29,10 @@ interface Config {
   templates: {
     customPath?: string;
   };
+  styles: {
+    enabled: boolean;
+    activePreset?: string;
+  };
 }
 
 export class ConfigManager {
@@ -52,7 +56,11 @@ export class ConfigManager {
       port: 3000,
       autoOpen: true
     },
-    templates: {}
+    templates: {},
+    styles: {
+      enabled: false,
+      activePreset: undefined
+    }
   };
 
   constructor() {

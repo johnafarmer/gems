@@ -15,6 +15,7 @@ GEMS is a blazing-fast CLI tool for rapid prototyping of web components for Word
 - **🔌 WordPress Ready** - Components work seamlessly with WordPress
 - **👁️ Live Preview** - Interactive preview server with component management
 - **💎 SHARDS** - Create and browse multiple versions of your components
+- **🎨 Style Presets** - Define consistent design guidelines for all components
 - **🎨 Interactive Mode** - User-friendly CLI with visual menus
 
 ### Coming Soon
@@ -104,6 +105,39 @@ SHARDS let you create multiple versions of any component directly from the previ
 5. **Copy any version** independently
 
 Each SHARD maintains the original component's structure while applying your requested modifications.
+
+## 🎨 Style Presets
+
+Style Presets let you define consistent design guidelines that are automatically applied to all generated components. This ensures brand consistency across your entire component library.
+
+### How Style Presets Work
+
+1. **Create a style preset** with your brand colors, typography, and design principles
+2. **Enable styles** in the settings (off by default to maintain existing behavior)
+3. **Select an active preset** from your collection
+4. **Generate components** - they'll automatically follow your style guidelines
+
+### Creating Style Presets
+
+In the preview server:
+1. Click the **Settings** button (⚙️)
+2. Navigate to the **Style Presets** section
+3. Click **Create New Style** 
+4. Define your guidelines including:
+   - Color palette (primary, secondary, accent colors)
+   - Typography (fonts, sizes, weights)
+   - Visual style (modern, classic, playful, professional)
+   - Layout preferences (spacing, borders, shadows)
+   - Any specific design patterns
+
+### Benefits
+
+- **Consistency** - All components follow the same design language
+- **Efficiency** - No need to specify styles for each component
+- **Flexibility** - Switch between different brands or themes instantly
+- **Works with both GEMs and SHARDs** - Style presets apply to both new components and variations
+
+Style presets are stored in the `styles/` directory and can be version controlled with your project.
 
 ## 🎯 Usage Examples
 
