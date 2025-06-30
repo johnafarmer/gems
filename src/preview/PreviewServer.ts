@@ -60,7 +60,26 @@ export class PreviewServer {
           req.on('data', chunk => body += chunk);
           req.on('end', () => {
             try {
-              const { oldName, newName } = JSON.parse(body);
+              let { oldName, newName } = JSON.parse(body);
+              
+              // Sanitize the new name on server side as well
+              const nameWithoutExt = newName.replace('.html', '');
+              const parts = nameWithoutExt.split('-');
+              const timestamp = parts[parts.length - 1];
+              let baseName = parts.slice(0, -1).join('-');
+              
+              // Apply same sanitization rules
+              baseName = baseName
+                .toLowerCase()
+                .replace(/[^a-z0-9\s-]+/g, '')
+                .replace(/\s+/g, '-')
+                .replace(/-+/g, '-')
+                .replace(/^-+|-+$/g, '')
+                .slice(0, 50);
+              
+              // Reconstruct the filename with sanitized base and timestamp
+              newName = baseName ? `${baseName}-${timestamp}.html` : `component-${timestamp}.html`;
+              
               const oldHtml = join(process.cwd(), 'generated', oldName);
               const oldJs = oldHtml.replace('.html', '.js');
               const newHtml = join(process.cwd(), 'generated', newName);
@@ -1825,7 +1844,7 @@ export class PreviewServer {
     async function confirmEdit() {
       if (!editingComponent) return;
       
-      const newType = document.getElementById('editComponentName').value.trim();
+      let newType = document.getElementById('editComponentName').value.trim();
       if (!newType) {
         // Add error feedback
         const input = document.getElementById('editComponentName');
@@ -1837,6 +1856,15 @@ export class PreviewServer {
         }, 300);
         return;
       }
+      
+      // Sanitize the name: convert spaces to dashes and remove invalid characters
+      newType = newType
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]+/g, '')  // Remove special chars except spaces and dashes
+        .replace(/\s+/g, '-')           // Convert spaces to dashes
+        .replace(/-+/g, '-')            // Collapse multiple dashes
+        .replace(/^-+|-+$/g, '')        // Remove leading/trailing dashes
+        .slice(0, 50);                  // Limit to 50 chars
       
       // Extract timestamp from current name
       const currentName = editingComponent.replace('.html', '');

@@ -1,13 +1,7 @@
+import Database from 'better-sqlite3';
 import { join } from 'path';
 import { homedir } from 'os';
 import { existsSync, mkdirSync } from 'fs';
-
-// Type definitions for better cross-runtime support
-interface DatabaseInterface {
-  prepare(sql: string): any;
-  exec(sql: string): void;
-  close(): void;
-}
 
 export interface Component {
   id?: number;
@@ -28,7 +22,7 @@ export interface ListOptions {
 }
 
 export class ComponentLibrary {
-  private db: DatabaseInterface;
+  private db: Database.Database;
   
   constructor() {
     const dataDir = join(homedir(), '.gems', 'data');
@@ -37,23 +31,12 @@ export class ComponentLibrary {
     }
     
     const dbPath = join(dataDir, 'components.db');
-    
-    // Use Bun's built-in SQLite when available, otherwise fall back to better-sqlite3
-    if (typeof Bun !== 'undefined') {
-      // Running under Bun - use built-in SQLite
-      const { Database } = require('bun:sqlite');
-      this.db = new Database(dbPath) as DatabaseInterface;
-    } else {
-      // Running under Node.js - use better-sqlite3
-      const Database = require('better-sqlite3');
-      this.db = new Database(dbPath) as DatabaseInterface;
-    }
-    
+    this.db = new Database(dbPath);
     this.initDatabase();
   }
   
   private initDatabase(): void {
-    const sql = `
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS components (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE NOT NULL,
@@ -65,14 +48,7 @@ export class ComponentLibrary {
         created DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated DATETIME
       )
-    `;
-    
-    if (typeof Bun !== 'undefined') {
-      // Bun uses run() instead of exec()
-      (this.db as any).run(sql);
-    } else {
-      this.db.exec(sql);
-    }
+    `);
   }
   
   async save(component: Omit<Component, 'id' | 'created'>): Promise<number> {
@@ -128,15 +104,8 @@ export class ComponentLibrary {
       params.push(options.limit);
     }
     
-    let rows: any[];
-    if (typeof Bun !== 'undefined') {
-      // Bun uses query() instead of prepare().all()
-      const dbQuery = (this.db as any).query(query);
-      rows = dbQuery.all(...params);
-    } else {
-      const stmt = this.db.prepare(query);
-      rows = stmt.all(...params) as any[];
-    }
+    const stmt = this.db.prepare(query);
+    const rows = stmt.all(...params) as any[];
     
     return rows.map(row => ({
       ...row,
