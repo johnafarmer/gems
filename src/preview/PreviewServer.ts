@@ -52,7 +52,7 @@ export class PreviewServer {
         const component = parsedUrl.searchParams.get('component') || options.component;
         
         if (pathname === '/') {
-          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
           res.end(this.getIndexHtml(component));
         } else if (pathname === '/api/rename' && req.method === 'POST') {
           // Handle rename
@@ -75,7 +75,7 @@ export class PreviewServer {
                 const oldJsName = oldName.replace('.html', '.js');
                 const newJsName = newName.replace('.html', '.js');
                 htmlContent = htmlContent.replace(`src="./${oldJsName}"`, `src="./${newJsName}"`);
-                writeFileSync(newHtml, htmlContent);
+                writeFileSync(newHtml, htmlContent, 'utf-8');
                 
                 // Delete old HTML file after writing new one
                 unlinkSync(oldHtml);
@@ -114,6 +114,12 @@ export class PreviewServer {
           if (filename) {
             try {
               const jsPath = join(process.cwd(), 'generated', filename.replace('.html', '.js'));
+              
+              // Check if the file exists
+              if (!existsSync(jsPath)) {
+                throw new Error(`JavaScript file not found: ${filename.replace('.html', '.js')}`);
+              }
+              
               const jsContent = readFileSync(jsPath, 'utf-8');
               
               // Extract element name from the customElements.define call
@@ -129,6 +135,7 @@ export class PreviewServer {
                 .replace(/\s*([{}:;,=<>+\-*\/!])\s*/g, '$1') // Remove spaces around operators
                 .replace(/;\s*}/g, '}') // Remove unnecessary semicolons before closing braces
                 .trim();
+              
               
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ 
@@ -249,7 +256,7 @@ export class PreviewServer {
                   cleanedCode: cleanCode,
                   originalComponent: originalJsPath,
                   model: result.source
-                }, null, 2));
+                }, null, 2), 'utf-8');
                 
                 console.error(`Failed generation saved to: ${failedFile}`);
                 throw new Error('Generated code does not appear to be a valid web component');
@@ -259,16 +266,36 @@ export class PreviewServer {
               const newHtmlName = `${parsed.gemId}-v${nextVersion}.html`;
               const newJsName = `${parsed.gemId}-v${nextVersion}.js`;
               
-              // Read original HTML and update script src
+              // Extract the original element name from the code
+              const elementNameMatch = cleanCode.match(/customElements\.define\(['"]([^'"]+)['"]/);
+              const originalElementName = elementNameMatch ? elementNameMatch[1] : 'unknown-element';
+              
+              // Create a versioned element name
+              const versionedElementName = `${originalElementName}-v${nextVersion}`;
+              
+              // Update the element name in the JavaScript code
+              cleanCode = cleanCode.replace(
+                /customElements\.define\(['"][^'"]+['"]/,
+                `customElements.define('${versionedElementName}'`
+              );
+              
+              // Read original HTML and update both script src and element usage
               const originalHtml = readFileSync(originalHtmlPath, 'utf-8');
-              const newHtml = originalHtml.replace(
+              let newHtml = originalHtml.replace(
                 /src="[^"]+\.js"/,
                 `src="${newJsName}"`
               );
               
+              // Also update the element tag in the HTML
+              const elementTagRegex = new RegExp(`<${originalElementName}([^>]*)>`, 'g');
+              const elementCloseTagRegex = new RegExp(`</${originalElementName}>`, 'g');
+              newHtml = newHtml
+                .replace(elementTagRegex, `<${versionedElementName}$1>`)
+                .replace(elementCloseTagRegex, `</${versionedElementName}>`);
+              
               // Write new files
-              writeFileSync(join(generatedDir, newHtmlName), newHtml);
-              writeFileSync(join(generatedDir, newJsName), cleanCode);
+              writeFileSync(join(generatedDir, newHtmlName), newHtml, 'utf-8');
+              writeFileSync(join(generatedDir, newJsName), cleanCode, 'utf-8');
               
               // Save metadata for the shard
               const metadataPath = join(generatedDir, `${parsed.gemId}-v${nextVersion}.meta.json`);
@@ -280,7 +307,7 @@ export class PreviewServer {
                 version: nextVersion,
                 baseGem: parsed.gemId
               };
-              writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+              writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf-8');
               
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ 
@@ -373,7 +400,16 @@ export class PreviewServer {
               
               const { ConfigManager } = await import('../config/ConfigManager.js');
               const config = new ConfigManager();
-              const openRouterAvailable = !!config.get('ai.openrouter.key');
+              const apiKey = config.get('ai.openrouter.key');
+              const openRouterAvailable = !!apiKey;
+              
+              // Debug logging
+              console.log('OpenRouter API Key check:', {
+                hasKey: openRouterAvailable,
+                keyLength: apiKey ? apiKey.length : 0,
+                envKey: !!process.env.OPENROUTER_API_KEY,
+                envKeyLength: process.env.OPENROUTER_API_KEY ? process.env.OPENROUTER_API_KEY.length : 0
+              });
               
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({
@@ -394,11 +430,15 @@ export class PreviewServer {
               const config = new ConfigManager();
               const apiKey = config.get('ai.openrouter.key');
               
-              if (!apiKey) {
-                throw new Error('OpenRouter API key not configured');
-              }
+              // Debug logging
+              console.log('Get models API Key check:', {
+                hasKey: !!apiKey,
+                keyLength: apiKey ? apiKey.length : 0,
+                configAi: config.get('ai')
+              });
               
-              // Return a curated list of popular models
+              // Always return the list of models, even if no API key
+              // The client will handle whether to enable/disable based on key presence
               const models = [
                 { id: 'anthropic/claude-sonnet-4', name: '🚀 Claude Sonnet 4' },
                 { id: 'openai/gpt-4o', name: '⚡ GPT-4o' },
@@ -410,11 +450,16 @@ export class PreviewServer {
                 { id: 'meta-llama/llama-3-70b-instruct', name: '🦙 Llama 3 70B' }
               ];
               
-              res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify(models));
+              res.writeHead(200, { 
+                'Content-Type': 'application/json',
+                'Cache-Control': 'no-cache'
+              });
+              res.end(JSON.stringify({ models, hasApiKey: !!apiKey }));
             } catch (error) {
-              res.writeHead(500, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+              console.error('Error in /api/get-models:', error);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              // Return empty models array on error to prevent client-side issues
+              res.end(JSON.stringify({ models: [], hasApiKey: false, error: error instanceof Error ? error.message : String(error) }));
             }
           })();
         } else if (pathname === '/api/update-config' && req.method === 'POST') {
@@ -472,14 +517,14 @@ export class PreviewServer {
             if (ext === '.html' && req.headers.referer) {
               const htmlContent = readFileSync(filePath, 'utf-8');
               const cleanedHtml = this.cleanHtmlForPreview(htmlContent);
-              res.writeHead(200, { 'Content-Type': 'text/html' });
+              res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
               res.end(cleanedHtml);
             } else {
-              const contentType = ext === '.js' ? 'application/javascript' : 
-                                 ext === '.html' ? 'text/html' : 
-                                 'text/plain';
+              const contentType = ext === '.js' ? 'application/javascript; charset=utf-8' : 
+                                 ext === '.html' ? 'text/html; charset=utf-8' : 
+                                 'text/plain; charset=utf-8';
               res.writeHead(200, { 'Content-Type': contentType });
-              res.end(readFileSync(filePath));
+              res.end(readFileSync(filePath, 'utf-8'));
             }
           } else {
             res.writeHead(404);
@@ -579,6 +624,7 @@ export class PreviewServer {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GEMS Preview ✨</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💎</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=OpenDyslexic:wght@400;700&display=swap" rel="stylesheet">
@@ -1498,8 +1544,11 @@ export class PreviewServer {
         
         // Update all buttons in this item to use the selected version path
         const buttons = targetFileItem.querySelectorAll('.file-actions button');
+        console.log('Updating buttons for version:', path, 'Found buttons:', buttons.length);
         buttons.forEach(btn => {
+          const oldPath = btn.dataset.path;
           btn.dataset.path = path;
+          console.log('Updated button', btn.className, 'from', oldPath, 'to', path);
         });
       }
       
@@ -1567,7 +1616,7 @@ export class PreviewServer {
       document.querySelectorAll('.version-link').forEach(link => {
         link.classList.remove('active');
       });
-      const activeVersionLink = document.querySelector(\`.version-link[onclick="loadComponent('\${path}')"]\`);
+      const activeVersionLink = document.querySelector(\`.version-link[data-path="\${path}"]\`);
       if (activeVersionLink) {
         activeVersionLink.classList.add('active');
       }
@@ -1607,6 +1656,25 @@ export class PreviewServer {
     
     async function copyComponent(path) {
       console.log('copyComponent called with path:', path);
+      
+      // Debug: Check what the active component actually is
+      const activeItem = document.querySelector('.file-item.active');
+      if (activeItem) {
+        const copyBtn = activeItem.querySelector('.file-actions button.copy');
+        console.log('Active item copy button path:', copyBtn?.dataset.path);
+        
+        // Also check if we have an active version link
+        const activeVersionLink = activeItem.querySelector('.version-link.active');
+        if (activeVersionLink) {
+          console.log('Active version link path:', activeVersionLink.dataset.path);
+          // Use the active version's path instead if it exists
+          if (activeVersionLink.dataset.path && activeVersionLink.dataset.path !== path) {
+            console.log('OVERRIDING path with active version:', activeVersionLink.dataset.path);
+            path = activeVersionLink.dataset.path;
+          }
+        }
+      }
+      
       try {
         // Fetch component code
         const response = await fetch('/api/component-code?file=' + encodeURIComponent(path));
@@ -2227,12 +2295,31 @@ export class PreviewServer {
     async function loadOpenRouterModels(currentModel) {
       try {
         const response = await fetch('/api/get-models');
-        const models = await response.json();
+        const data = await response.json();
         
         const select = document.getElementById('cloudModel');
-        select.innerHTML = models.map(model => 
-          \`<option value="\${model.id}" \${model.id === currentModel ? 'selected' : ''}>\${model.name}</option>\`
-        ).join('');
+        
+        // Check if we have models array in the response
+        if (data.models && Array.isArray(data.models)) {
+          if (data.models.length > 0) {
+            select.innerHTML = data.models.map(model => 
+              \`<option value="\${model.id}" \${model.id === currentModel ? 'selected' : ''}>\${model.name}</option>\`
+            ).join('');
+          } else {
+            select.innerHTML = '<option value="">No models available</option>';
+          }
+          
+          // Update the API key status if provided
+          if (data.hasApiKey === false) {
+            const radioLabel = document.querySelector('label[for="modelTypeCloud"]');
+            if (radioLabel && !radioLabel.textContent.includes('No API Key')) {
+              radioLabel.innerHTML = '☁️ OpenRouter <span style="color: #ef4444;">(No API Key)</span>';
+            }
+          }
+        } else {
+          // Fallback for old response format
+          select.innerHTML = '<option value="">Failed to load models</option>';
+        }
       } catch (error) {
         console.error('Failed to load models:', error);
         document.getElementById('cloudModel').innerHTML = '<option value="">Failed to load models</option>';

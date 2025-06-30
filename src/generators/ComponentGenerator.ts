@@ -99,7 +99,7 @@ export class ComponentGenerator {
       
       // Write files to disk
       files.forEach(file => {
-        writeFileSync(file.path, file.content);
+        writeFileSync(file.path, file.content, 'utf-8');
       });
       
       // Save metadata file alongside the component
@@ -112,7 +112,7 @@ export class ComponentGenerator {
         prompt,
         aiSource: (this as any).lastSource
       };
-      writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+      writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), 'utf-8');
       
       return {
         files,
@@ -145,7 +145,7 @@ export class ComponentGenerator {
       ];
       
       files.forEach(file => {
-        writeFileSync(file.path, file.content);
+        writeFileSync(file.path, file.content, 'utf-8');
       });
       
       return {

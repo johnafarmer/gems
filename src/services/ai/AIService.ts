@@ -28,11 +28,20 @@ export class AIService {
 
   private initializeClients(): void {
     const openRouterKey = this.config.get('ai.openrouter.key');
+    console.log('AIService initialization:', {
+      hasKey: !!openRouterKey,
+      keyLength: openRouterKey ? openRouterKey.length : 0,
+      defaultModel: this.config.get('ai.defaultModel')
+    });
+    
     if (openRouterKey) {
       this.openai = new OpenAI({
         apiKey: openRouterKey,
         baseURL: 'https://openrouter.ai/api/v1'
       });
+      console.log('OpenAI client initialized for OpenRouter');
+    } else {
+      console.log('No OpenRouter key found, OpenAI client not initialized');
     }
   }
 
@@ -109,6 +118,12 @@ export class AIService {
   }
 
   private async generateCloud(options: GenerateOptions): Promise<GenerateResult> {
+    console.log('generateCloud called:', {
+      hasOpenAI: !!this.openai,
+      openRouterKey: !!this.config.get('ai.openrouter.key'),
+      defaultModel: this.config.get('ai.defaultModel')
+    });
+    
     if (!this.openai) {
       // Fallback to template-based generation when no AI is available
       console.warn('No AI service configured. Using template-based generation.');

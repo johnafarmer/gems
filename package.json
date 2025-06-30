@@ -5,11 +5,11 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "gems": "./dist/cli.js"
+    "gems": "./dist/index.js"
   },
   "scripts": {
     "dev": "bun run --watch src/index.ts",
-    "build": "bun build src/index.ts --outdir=dist --target=node",
+    "build": "bun build src/index.ts --outdir=dist --target=bun",
     "test": "vitest",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
