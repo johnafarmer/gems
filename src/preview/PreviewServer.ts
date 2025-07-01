@@ -1,6 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { join, extname } from 'path';
-import { readFileSync, existsSync, readdirSync, statSync, unlinkSync, renameSync, writeFileSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, statSync, unlinkSync, renameSync, writeFileSync, mkdirSync } from 'fs';
 
 export interface PreviewServerOptions {
   port?: number;
@@ -421,7 +421,7 @@ export class PreviewServer {
           });
         } else if (pathname === '/api/check-endpoints' && req.method === 'GET') {
           // Check availability of AI endpoints
-          (async () => {
+          const checkEndpoints = async () => {
             try {
               const localEndpoint = 'http://localhost:1234';
               const networkEndpoint = process.env.LM_STUDIO_NETWORK_ENDPOINT || 'http://10.0.0.237:1234';
@@ -465,10 +465,18 @@ export class PreviewServer {
               res.writeHead(500, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
             }
-          })();
+          };
+          
+          checkEndpoints().catch(() => {
+            // Ensure response is sent even if promise is rejected
+            if (!res.headersSent) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Internal server error' }));
+            }
+          });
         } else if (pathname === '/api/get-models' && req.method === 'GET') {
           // Get available OpenRouter models
-          (async () => {
+          const getModels = async () => {
             try {
               const { ConfigManager } = await import('../config/ConfigManager.js');
               const config = new ConfigManager();
@@ -505,7 +513,15 @@ export class PreviewServer {
               // Return empty models array on error to prevent client-side issues
               res.end(JSON.stringify({ models: [], hasApiKey: false, error: error instanceof Error ? error.message : String(error) }));
             }
-          })();
+          };
+          
+          getModels().catch(() => {
+            // Ensure response is sent even if promise is rejected
+            if (!res.headersSent) {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ models: [], hasApiKey: false, error: 'Internal server error' }));
+            }
+          });
         } else if (pathname === '/api/update-config' && req.method === 'POST') {
           // Update configuration
           let body = '';
@@ -2461,11 +2477,21 @@ export class PreviewServer {
     async function showSettingsModal() {
       document.getElementById('settingsModal').classList.add('show');
       
-      // Load current settings
+      // Load current settings with timeout protection
       try {
+        // Add timeout wrapper to prevent hanging
+        const timeoutPromise = (promise, timeoutMs = 3000) => {
+          return Promise.race([
+            promise,
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Request timeout')), timeoutMs)
+            )
+          ]);
+        };
+        
         const [configRes, statusRes] = await Promise.all([
-          fetch('/api/current-config'),
-          fetch('/api/check-endpoints')
+          timeoutPromise(fetch('/api/current-config')),
+          timeoutPromise(fetch('/api/check-endpoints'))
         ]);
         
         const config = await configRes.json();
@@ -2642,7 +2668,30 @@ export class PreviewServer {
         
       } catch (error) {
         console.error('Failed to load settings:', error);
-        document.getElementById('settingsContent').innerHTML = '<p style="color: #ef4444;">Failed to load settings</p>';
+        
+        // Show a more helpful error message with retry option
+        document.getElementById('settingsContent').innerHTML = \`
+          <div style="text-align: center; padding: 2rem;">
+            <p style="color: #ef4444; margin-bottom: 1rem;">
+              \${error.message === 'Request timeout' 
+                ? '⏱️ Settings loading timed out (LM Studio may be offline)'
+                : '❌ Failed to load settings'}
+            </p>
+            <p style="opacity: 0.8; margin-bottom: 1.5rem; font-size: 0.875rem;">
+              This usually happens when LM Studio is not responding. 
+              You can still use OpenRouter or update your settings.
+            </p>
+            <button onclick="showSettingsModal()" 
+              style="padding: 0.5rem 1rem; background: rgba(103, 126, 234, 0.8); 
+                     border: none; color: white; border-radius: 6px; cursor: pointer;
+                     transition: all 0.3s;">
+              🔄 Retry Loading Settings
+            </button>
+          </div>
+        \`;
+        
+        // Try to load style presets anyway (they don't depend on LM Studio)
+        loadStylePresets();
       }
     }
     
