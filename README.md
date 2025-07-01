@@ -1,5 +1,6 @@
 # GEMS - Generative Element Management System 🚀
 
+[![npm version](https://img.shields.io/npm/v/gems-cli.svg?style=flat)](https://www.npmjs.com/package/gems-cli)
 [![Built with Bun](https://img.shields.io/badge/Built%20with-Bun-f6f6f6?style=flat&logo=bun&logoColor=f6f6f6)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue?style=flat&logo=typescript)](https://www.typescriptlang.org/)
 [![Powered by AI](https://img.shields.io/badge/Powered%20by-AI-blueviolet?style=flat)](https://openrouter.ai)
@@ -27,7 +28,10 @@ GEMS is a blazing-fast CLI tool for rapid prototyping of web components for Word
 ## 🚀 Quick Start
 
 ```bash
-# Install GEMS globally
+# Install GEMS globally via npm
+npm install -g gems-cli
+
+# Or with Bun (faster!)
 bun install -g gems-cli
 
 # Generate your first component
@@ -45,7 +49,7 @@ gems config ai
 
 ## 🛠️ Tech Stack
 
-- **Runtime**: [Bun](https://bun.sh) - All-in-one JavaScript runtime & toolkit
+- **Runtime**: [Bun](https://bun.sh) (primary) with Node.js compatibility
 - **Language**: TypeScript 5.0+
 - **CLI Framework**: [Cliffy](https://cliffy.io) - Type-safe CLI framework
 - **AI Integration**: 
@@ -56,13 +60,25 @@ gems config ai
 
 ## 📋 Prerequisites
 
-- Bun 1.0+ installed (`curl -fsSL https://bun.sh/install | bash`)
-- Node.js 18+ (for some dependencies)
+- Node.js 18+ or Bun 1.0+
 - LM Studio (optional, for local AI)
 - OpenRouter API key (optional, for cloud AI)
 
 ## 📦 Installation
 
+### From npm (Recommended)
+```bash
+# Install globally with npm
+npm install -g gems-cli
+
+# Or with Bun (faster!)
+bun install -g gems-cli
+
+# Start using GEMS
+gems
+```
+
+### From Source
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/gems.git
@@ -241,6 +257,7 @@ MIT © John Farmer
 - Live preview server
 - WordPress-ready output
 - **SHARDS versioning system** (NEW!)
+- **npm package distribution** (NEW!)
 
 ### 🚧 In Progress
 - Screenshot to component

@@ -1,0 +1,81 @@
+# Source TypeScript files (we're publishing compiled JS)
+src/
+tsconfig.json
+
+# Development and testing
+tests/
+coverage/
+.nyc_output
+test-results/
+playwright-report/
+*.test.ts
+*.spec.ts
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Editor and IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Generated components (user-specific)
+generated/
+
+# Claude-specific files
+.claude/
+CLAUDE.md
+
+# Git and CI
+.git/
+.github/
+.gitignore
+
+# Build artifacts
+*.tsbuildinfo
+bun.lockb
+
+# Documentation development files
+docs/
+*.drawio
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+bun-error.log*
+
+# Database
+*.sqlite
+*.sqlite3
+*.db
+
+# AI Model Cache
+.cache/
+model-cache/
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Development scripts
+run.sh
+
+# Example outputs
+examples/generated/
+
+# User styles (except template)
+styles/*
+!styles/STYLE_TEMPLATE.md
+!styles/.gitkeep

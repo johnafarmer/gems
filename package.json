@@ -1,11 +1,11 @@
 {
   "name": "gems-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Generative Element Management System - AI-powered WordPress HTMLcomponent generator",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "gems": "./dist/index.js"
+    "gems": "./bin/gems"
   },
   "scripts": {
     "dev": "bun run --watch src/index.ts",
@@ -60,6 +60,14 @@
   "author": "https://github.com/johnafarmer",
   "license": "MIT",
   "engines": {
-    "bun": ">=1.0.0"
-  }
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/johnafarmer/gems.git"
+  },
+  "bugs": {
+    "url": "https://github.com/johnafarmer/gems/issues"
+  },
+  "homepage": "https://github.com/johnafarmer/gems#readme"
 }

@@ -1,2 +1,38 @@
-#!/usr/bin/env bun
-import '../src/index.ts';
+#!/usr/bin/env node
+
+// This file provides compatibility for both Node.js and Bun runtimes
+// It detects which runtime is available and uses the appropriate method
+
+const { execSync } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+
+// Check if Bun is available
+function hasBun() {
+  try {
+    execSync('bun --version', { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Get the source file path
+const srcPath = path.join(__dirname, '..', 'src', 'index.ts');
+const distPath = path.join(__dirname, '..', 'dist', 'index.js');
+
+// If Bun is available and the TypeScript source exists, use Bun
+if (hasBun() && fs.existsSync(srcPath)) {
+  // Run with Bun for better performance and direct TypeScript execution
+  execSync(`bun "${srcPath}"`, { 
+    stdio: 'inherit',
+    env: { ...process.env }
+  });
+} else if (fs.existsSync(distPath)) {
+  // Fallback to Node.js with the compiled JavaScript
+  require(distPath);
+} else {
+  console.error('Error: GEMS CLI files not found.');
+  console.error('Please ensure the package is properly installed.');
+  process.exit(1);
+}
