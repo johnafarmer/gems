@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
-// This file provides compatibility for both Node.js and Bun runtimes
-// It detects which runtime is available and uses the appropriate method
+import { execSync } from 'child_process';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import { existsSync } from 'fs';
 
-const { execSync } = require('child_process');
-const path = require('path');
-const fs = require('fs');
+// Get the directory of this file
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Check if Bun is available
 function hasBun() {
@@ -18,19 +20,19 @@ function hasBun() {
 }
 
 // Get the source file path
-const srcPath = path.join(__dirname, '..', 'src', 'index.ts');
-const distPath = path.join(__dirname, '..', 'dist', 'index.js');
+const srcPath = join(__dirname, '..', 'src', 'index.ts');
+const distPath = join(__dirname, '..', 'dist', 'index.js');
 
 // If Bun is available and the TypeScript source exists, use Bun
-if (hasBun() && fs.existsSync(srcPath)) {
+if (hasBun() && existsSync(srcPath)) {
   // Run with Bun for better performance and direct TypeScript execution
   execSync(`bun "${srcPath}"`, { 
     stdio: 'inherit',
     env: { ...process.env }
   });
-} else if (fs.existsSync(distPath)) {
+} else if (existsSync(distPath)) {
   // Fallback to Node.js with the compiled JavaScript
-  require(distPath);
+  await import(distPath);
 } else {
   console.error('Error: GEMS CLI files not found.');
   console.error('Please ensure the package is properly installed.');
