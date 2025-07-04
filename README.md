@@ -7,6 +7,18 @@
 
 GEMS is a blazing-fast CLI tool for rapid prototyping of web components for WordPress websites. Generate beautiful, accessible components through natural language prompts - all with a local-first approach that respects your privacy and works offline.
 
+## 🎬 See GEMS in Action
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/johnafarmer/gems-demo/main/gems-demo.gif" alt="GEMS Demo - Creating stunning web components with AI" width="100%" />
+</p>
+
+<p align="center">
+  <strong>Example component generated with GEMS using Claude Sonnet 4</strong><br>
+  <a href="https://johnafarmer.github.io/gems-demo/">🔗 Live Demo</a> | 
+  <a href="https://github.com/johnafarmer/gems-demo">📦 Demo Repository</a>
+</p>
+
 ## ✨ Features
 
 ### Available Now
