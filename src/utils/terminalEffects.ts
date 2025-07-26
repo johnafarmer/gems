@@ -52,7 +52,10 @@ export class TerminalEffects {
       // Display source info if available
       if (source) {
         let sourceText = '';
-        if (source.type === 'local') {
+        if (source.type === 'claude-code') {
+          const modelName = source.model || 'Claude sonnet-4';
+          sourceText = chalk.blueBright('🤖 Claude Code: ') + chalk.white(modelName);
+        } else if (source.type === 'local') {
           const modelName = source.model?.split('/').pop() || 'Local Model';
           sourceText = chalk.cyan('🖥️  Local LM Studio: ') + chalk.white(modelName);
         } else if (source.type === 'network') {
@@ -169,7 +172,10 @@ export class TerminalEffects {
     // Source info
     if (source) {
       let sourceText = '';
-      if (source.type === 'local') {
+      if (source.type === 'claude-code') {
+        const modelName = source.model || 'Claude sonnet-4';
+        sourceText = chalk.blueBright('Generated with Claude Code (') + chalk.white(modelName) + chalk.blueBright(')');
+      } else if (source.type === 'local') {
         const modelName = source.model?.split('/').pop() || 'Local Model';
         sourceText = chalk.cyan('Generated with Local LM Studio (') + chalk.white(modelName) + chalk.cyan(')');
       } else if (source.type === 'network') {

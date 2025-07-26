@@ -22,8 +22,9 @@ GEMS is a blazing-fast CLI tool for rapid prototyping of web components for Word
 ## ✨ Features
 
 ### Available Now
+- **🤖 Claude Code Integration** - Use Claude Sonnet 4 & Opus 4 with your existing subscription
 - **🎯 Natural Language Generation** - Describe what you want, get production-ready components
-- **🏠 Local-First** - Primary AI processing via LM Studio, fallback to cloud when needed
+- **🏠 Local-First** - Primary AI via Claude Code or LM Studio, fallback to cloud when needed
 - **⚡ Lightning Fast** - Built with Bun for superior performance
 - **🔌 WordPress Ready** - Components work seamlessly with WordPress
 - **👁️ Live Preview** - Interactive preview server with component management
@@ -65,6 +66,7 @@ gems config ai
 - **Language**: TypeScript 5.0+
 - **CLI Framework**: [Cliffy](https://cliffy.io) - Type-safe CLI framework
 - **AI Integration**: 
+  - [Claude Code](https://claude.ai/code) for Sonnet 4 & Opus 4 models
   - [LM Studio](https://lmstudio.ai) for local models
   - [OpenRouter](https://openrouter.ai) for cloud models
 - **Preview Server**: Custom-built with glassmorphic UI
@@ -73,6 +75,7 @@ gems config ai
 ## 📋 Prerequisites
 
 - Node.js 18+ or Bun 1.0+
+- Claude Code CLI (optional, for Claude models without API costs)
 - LM Studio (optional, for local AI)
 - OpenRouter API key (optional, for cloud AI)
 
@@ -183,11 +186,17 @@ gems create "A testimonial carousel with customer photos and ratings"
 
 ### Advanced Features
 ```bash
-# Use local AI model
-gems create nav --model local
+# Use Claude Code with Sonnet 4 (default)
+gems create nav --model claude-code
+
+# Use Claude Code with Opus 4 for complex components
+gems create "complex dashboard with real-time charts" --model claude-code-opus
+
+# Use local AI model (LM Studio)
+gems create hero --model local
 
 # Use cloud AI model (OpenRouter)
-gems create hero --model cloud
+gems create testimonial --model cloud
 
 # Interactive mode for easy creation
 gems
@@ -195,11 +204,17 @@ gems
 
 ### Configuration
 ```bash
+# Configure Claude Code model preference
+gems config set ai.claudeCode.model "opus-4"  # or "sonnet-4"
+
 # Set up LM Studio endpoint
 gems config set ai.local.endpoint "http://10.0.0.###:1234"
 
 # Configure OpenRouter
 gems config set ai.openrouter.key "your-api-key"
+
+# Set default AI provider
+gems config set ai.defaultModel "claude-code"  # or "local" or "cloud"
 
 # Set default output format
 gems config set output.format "webcomponent"
@@ -207,15 +222,21 @@ gems config set output.format "webcomponent"
 
 ## 🤖 AI Configuration
 
-GEMS uses a smart routing system for AI:
+GEMS uses a smart routing system for AI with three providers:
 
-1. **Local Models** (via LM Studio)
+1. **Claude Code** (NEW! - Default)
+   - Uses your existing Claude Code subscription
+   - Access to Claude Sonnet 4 and Opus 4 models
+   - No additional API costs
+   - Requires Claude Code CLI to be installed
+
+2. **Local Models** (via LM Studio)
    - Default: Devstral at `http://10.0.0.237:1234`
    - Privacy-first, no data leaves your network
    - Works offline
 
-2. **Cloud Models** (via OpenRouter)
-   - Fallback when local unavailable
+3. **Cloud Models** (via OpenRouter)
+   - Fallback when Claude Code and local unavailable
    - Access to latest models
    - Requires API key
 

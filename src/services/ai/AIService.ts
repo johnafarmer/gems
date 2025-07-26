@@ -1,9 +1,10 @@
 import { ConfigManager } from '../../config/ConfigManager.js';
 import OpenAI from 'openai';
+import { ClaudeCodeProvider } from './providers/ClaudeCodeProvider.js';
 
 export interface GenerateOptions {
   prompt: string;
-  model?: 'local' | 'cloud';
+  model?: 'claude-code' | 'local' | 'cloud';
   temperature?: number;
   maxTokens?: number;
 }
@@ -11,7 +12,7 @@ export interface GenerateOptions {
 export interface GenerateResult {
   content: string;
   source: {
-    type: 'local' | 'network' | 'cloud' | 'template';
+    type: 'claude-code' | 'local' | 'network' | 'cloud' | 'template';
     endpoint?: string;
     model?: string;
   };
@@ -20,10 +21,12 @@ export interface GenerateResult {
 export class AIService {
   private config: ConfigManager;
   private openai?: OpenAI;
+  private claudeCodeProvider?: ClaudeCodeProvider;
 
   constructor(config: ConfigManager) {
     this.config = config;
     this.initializeClients();
+    this.claudeCodeProvider = new ClaudeCodeProvider(this.config.get('ai.claudeCode.timeout'));
   }
 
   private initializeClients(): void {
@@ -53,10 +56,46 @@ export class AIService {
   async generateWithSource(options: GenerateOptions): Promise<GenerateResult> {
     const model = options.model || this.config.get('ai.defaultModel');
     
-    if (model === 'local') {
+    if (model === 'claude-code') {
+      return this.generateClaudeCode(options);
+    } else if (model === 'local') {
       return this.generateLocal(options);
     } else {
       return this.generateCloud(options);
+    }
+  }
+
+  private async generateClaudeCode(options: GenerateOptions): Promise<GenerateResult> {
+    if (!this.claudeCodeProvider) {
+      console.warn('Claude Code provider not initialized, falling back to local');
+      return this.generateLocal(options);
+    }
+
+    const claudeModel = this.config.get('ai.claudeCode.model') || 'sonnet-4';
+    
+    try {
+      // Check if Claude Code is available
+      const isAvailable = await this.claudeCodeProvider.isAvailable();
+      if (!isAvailable) {
+        console.warn('Claude Code CLI not available, falling back to local model');
+        return this.generateLocal(options);
+      }
+
+      return await this.claudeCodeProvider.generate({
+        ...options,
+        model: claudeModel
+      });
+    } catch (error) {
+      console.warn('Claude Code generation failed:', error instanceof Error ? error.message : String(error));
+      
+      // If it's an auth error, fall back to cloud instead of local
+      if (error instanceof Error && error.message.includes('authentication')) {
+        console.log('Falling back to cloud model due to authentication issue');
+        return this.generateCloud(options);
+      }
+      
+      // For other errors, fall back to local
+      return this.generateLocal(options);
     }
   }
 
@@ -268,5 +307,12 @@ customElements.define('${componentType}-element', ${this.toPascalCase(componentT
     } catch {
       return false;
     }
+  }
+
+  async isClaudeCodeAvailable(): Promise<boolean> {
+    if (!this.claudeCodeProvider) {
+      return false;
+    }
+    return this.claudeCodeProvider.isAvailable();
   }
 }

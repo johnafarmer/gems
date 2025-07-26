@@ -26,7 +26,7 @@ Note: Put your description in quotes to ensure it's captured correctly.`)
   .option('-v, --variations <number>', 'Number of variations to generate', '1')
   .option('--voice', 'Use voice input')
   .option('--from-screenshot <path>', 'Generate from screenshot')
-  .option('--model <model>', 'AI model to use (local, cloud)')
+  .option('--model <model>', 'AI model to use (claude-code, claude-code-sonnet, claude-code-opus, local, cloud)')
   .option('--save <name>', 'Save to component library')
   .option('--no-preview', 'Skip auto-preview after generation')
   .action(async (type, description, options) => {
@@ -131,13 +131,32 @@ Note: Put your description in quotes to ensure it's captured correctly.`)
       const aiService = new AIService(config);
       const generator = new ComponentGenerator(aiService);
       
-      const modelType = options.model || config.get('ai.defaultModel');
+      // Parse model type from options
+      let modelType = options.model || config.get('ai.defaultModel');
+      let claudeCodeModel = undefined;
+      
+      // Handle claude-code model variations
+      if (modelType === 'claude-code-sonnet') {
+        modelType = 'claude-code';
+        claudeCodeModel = 'sonnet-4';
+      } else if (modelType === 'claude-code-opus') {
+        modelType = 'claude-code';
+        claudeCodeModel = 'opus-4';
+      }
+      
+      // If claude-code model is specified, update config temporarily
+      if (claudeCodeModel) {
+        config.set('ai.claudeCode.model', claudeCodeModel);
+      }
       
       // Use terminal effects for generation with source info
-      const sourceInfo: any = { type: modelType === 'local' ? 'local' : 'cloud' };
+      const sourceInfo: any = { type: modelType };
       
       // Add model details
-      if (modelType === 'cloud') {
+      if (modelType === 'claude-code') {
+        sourceInfo.model = `Claude ${claudeCodeModel || config.get('ai.claudeCode.model') || 'sonnet-4'}`;
+        sourceInfo.endpoint = 'Local CLI';
+      } else if (modelType === 'cloud') {
         sourceInfo.model = config.get('ai.openrouter.model') || 'OpenRouter';
       } else {
         sourceInfo.model = config.get('ai.local.model') || 'Local Model';

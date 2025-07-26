@@ -7,7 +7,11 @@ import { dirname } from 'path';
 
 interface Config {
   ai: {
-    defaultModel: 'local' | 'cloud';
+    defaultModel: 'claude-code' | 'local' | 'cloud';
+    claudeCode: {
+      model: 'sonnet-4' | 'opus-4';
+      timeout?: number;
+    };
     local: {
       endpoint: string;
       model?: string;
@@ -41,7 +45,11 @@ export class ConfigManager {
   private config: Config;
   private defaultConfig: Config = {
     ai: {
-      defaultModel: 'cloud',
+      defaultModel: 'claude-code',
+      claudeCode: {
+        model: 'sonnet-4',
+        timeout: 60000
+      },
       local: {
         endpoint: 'http://10.0.0.237:1234',
         model: 'mistralai/devstral-small-2505',
