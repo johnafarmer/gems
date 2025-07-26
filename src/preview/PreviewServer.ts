@@ -489,9 +489,9 @@ export class PreviewServer {
                 configAi: config.get('ai')
               });
               
-              // Always return the list of models, even if no API key
-              // The client will handle whether to enable/disable based on key presence
-              const models = [
+              // Check if user has custom model list
+              let models = [
+                { id: 'x-ai/grok-4', name: '🌟 Grok-4' },
                 { id: 'anthropic/claude-sonnet-4', name: '🚀 Claude Sonnet 4' },
                 { id: 'openai/gpt-4o', name: '⚡ GPT-4o' },
                 { id: 'openai/o3-mini', name: '✨ o3-mini' },
@@ -501,6 +501,12 @@ export class PreviewServer {
                 { id: 'anthropic/claude-3.7-sonnet', name: '🎯 Claude 3.7 Sonnet' },
                 { id: 'meta-llama/llama-3-70b-instruct', name: '🦙 Llama 3 70B' }
               ];
+              
+              // Try to load custom models
+              const customModels = config.get('ai.customModels');
+              if (customModels && Array.isArray(customModels) && customModels.length > 0) {
+                models = customModels;
+              }
               
               res.writeHead(200, { 
                 'Content-Type': 'application/json',
@@ -545,6 +551,42 @@ export class PreviewServer {
               if (cloudModel) {
                 config.set('ai.openrouter.model', cloudModel);
               }
+              
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: true }));
+            } catch (error) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+            }
+          });
+        } else if (pathname === '/api/custom-models' && req.method === 'GET') {
+          // Get custom model list
+          (async () => {
+            try {
+              const { ConfigManager } = await import('../config/ConfigManager.js');
+              const config = new ConfigManager();
+              const models = config.get('ai.customModels') || null;
+              
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ models }));
+            } catch (error) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+            }
+          })();
+        } else if (pathname === '/api/custom-models' && req.method === 'POST') {
+          // Save custom model list
+          let body = '';
+          req.on('data', chunk => body += chunk);
+          req.on('end', async () => {
+            try {
+              const { models } = JSON.parse(body);
+              
+              const { ConfigManager } = await import('../config/ConfigManager.js');
+              const config = new ConfigManager();
+              
+              // Save custom models
+              config.set('ai.customModels', models);
               
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ success: true }));
@@ -1644,6 +1686,61 @@ export class PreviewServer {
     </div>
   </div>
   
+  <!-- Manage Models modal -->
+  <div class="modal" id="manageModelsModal">
+    <div class="modal-content" style="max-width: 800px;">
+      <h3 style="margin-top: 0;">⚙️ Manage OpenRouter Models</h3>
+      
+      <div style="margin: 1rem 0;">
+        <p style="opacity: 0.8; font-size: 0.875rem;">
+          Customize your model quick list. Add models you use frequently and remove ones you don't need.
+        </p>
+      </div>
+      
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin: 1.5rem 0;">
+        <!-- Available Models -->
+        <div>
+          <h4 style="margin-bottom: 0.5rem;">Available Models</h4>
+          <div style="margin-bottom: 1rem;">
+            <input type="text" id="modelSearch" placeholder="Search models..." 
+              style="width: 100%; padding: 0.5rem; border-radius: 6px; 
+                     border: 1px solid rgba(255, 255, 255, 0.2); 
+                     background: rgba(255, 255, 255, 0.1); color: white;">
+          </div>
+          <div id="availableModelsList" 
+            style="height: 400px; overflow-y: auto; border: 1px solid rgba(255, 255, 255, 0.2); 
+                   border-radius: 8px; padding: 0.5rem; background: rgba(255, 255, 255, 0.05);">
+            <div style="text-align: center; padding: 2rem;">
+              <div style="animation: spin 1s linear infinite;">🔄</div>
+              <p style="margin-top: 1rem; opacity: 0.7;">Loading models...</p>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Your Quick List -->
+        <div>
+          <h4 style="margin-bottom: 0.5rem;">Your Quick List</h4>
+          <p style="font-size: 0.75rem; opacity: 0.7; margin-bottom: 1rem;">
+            Drag to reorder • Click × to remove
+          </p>
+          <div id="quickModelsList" 
+            style="height: 400px; overflow-y: auto; border: 1px solid rgba(255, 255, 255, 0.2); 
+                   border-radius: 8px; padding: 0.5rem; background: rgba(255, 255, 255, 0.05);">
+            <!-- Quick list will be populated here -->
+          </div>
+        </div>
+      </div>
+      
+      <div class="modal-buttons">
+        <button onclick="cancelManageModels()">Cancel</button>
+        <button class="confirm" onclick="saveModelList()" 
+          style="background: rgba(103, 126, 234, 0.5); border-color: rgba(103, 126, 234, 0.6);">
+          Save Changes
+        </button>
+      </div>
+    </div>
+  </div>
+  
   <!-- Edit/Rename GEM modal -->
   <div class="modal" id="editModal">
     <div class="modal-content" style="max-width: 600px;">
@@ -2475,27 +2572,29 @@ export class PreviewServer {
     
     // Settings functions
     async function showSettingsModal() {
+      // Show modal immediately - no blocking!
       document.getElementById('settingsModal').classList.add('show');
       
-      // Load current settings with timeout protection
+      // Show loading state first
+      const settingsContent = document.getElementById('settingsContent');
+      settingsContent.innerHTML = \`
+        <div style="text-align: center; padding: 2rem;">
+          <div style="font-size: 2rem; animation: spin 1s linear infinite;">⚙️</div>
+          <p style="margin-top: 1rem; opacity: 0.7;">Loading settings...</p>
+        </div>
+      \`;
+      
       try {
-        // Add timeout wrapper to prevent hanging
-        const timeoutPromise = (promise, timeoutMs = 3000) => {
-          return Promise.race([
-            promise,
-            new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Request timeout')), timeoutMs)
-            )
-          ]);
-        };
-        
-        const [configRes, statusRes] = await Promise.all([
-          timeoutPromise(fetch('/api/current-config')),
-          timeoutPromise(fetch('/api/check-endpoints'))
-        ]);
-        
+        // Load config first (this should be fast)
+        const configRes = await fetch('/api/current-config');
         const config = await configRes.json();
-        const status = await statusRes.json();
+        
+        // Initialize with unknown status - we'll check async
+        const status = { 
+          localAvailable: null, 
+          networkAvailable: null, 
+          openRouterAvailable: null 
+        };
         
         // Populate settings content
         const settingsContent = document.getElementById('settingsContent');
@@ -2509,11 +2608,11 @@ export class PreviewServer {
                 <div style="display: flex; gap: 1rem;">
                   <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
                     <input type="radio" name="modelType" value="local" \${config.defaultModel === 'local' ? 'checked' : ''}>
-                    <span>🖥️ Local/Network LM Studio \${status.localAvailable ? '<span style="color: #10b981;">(Online)</span>' : '<span style="color: #ef4444;">(Offline)</span>'}</span>
+                    <span>🖥️ Local/Network LM Studio <span id="localStatus" style="color: #fbbf24;">(Checking...)</span></span>
                   </label>
                   <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
                     <input type="radio" name="modelType" value="cloud" \${config.defaultModel === 'cloud' ? 'checked' : ''}>
-                    <span>☁️ OpenRouter \${status.openRouterAvailable ? '<span style="color: #10b981;">(Available)</span>' : '<span style="color: #ef4444;">(No API Key)</span>'}</span>
+                    <span>☁️ OpenRouter <span id="cloudStatus" style="color: #fbbf24;">(Checking...)</span></span>
                   </label>
                 </div>
               </div>
@@ -2529,9 +2628,17 @@ export class PreviewServer {
                 <label style="display: block; margin-bottom: 0.5rem; font-size: 0.875rem; opacity: 0.8;">OpenRouter Model:</label>
                 <select id="cloudModel" 
                   style="width: 100%; padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); 
-                         background: rgba(255, 255, 255, 0.1); color: white; font-family: inherit;">
+                         background: rgba(255, 255, 255, 0.1); color: white; font-family: inherit; margin-bottom: 1rem;">
                   <option value="">Loading models...</option>
                 </select>
+                
+                <button onclick="showManageModelsModal()" 
+                  style="padding: 0.5rem 1rem; background: rgba(103, 126, 234, 0.5); 
+                         border: 1px solid rgba(103, 126, 234, 0.6); color: white; 
+                         border-radius: 6px; cursor: pointer; transition: all 0.3s;
+                         font-size: 0.875rem;">
+                  ⚙️ Manage Model List
+                </button>
               </div>
             </div>
             
@@ -2658,13 +2765,16 @@ export class PreviewServer {
           });
         });
         
-        // Load OpenRouter models if cloud is selected
-        if (config.defaultModel === 'cloud' || status.openRouterAvailable) {
+        // Load OpenRouter models immediately if cloud is selected
+        if (config.defaultModel === 'cloud') {
           loadOpenRouterModels(config.cloudModel);
         }
         
         // Load style presets
         loadStylePresets();
+        
+        // Now check endpoints asynchronously (non-blocking)
+        checkEndpointsAsync();
         
       } catch (error) {
         console.error('Failed to load settings:', error);
@@ -2692,6 +2802,50 @@ export class PreviewServer {
         
         // Try to load style presets anyway (they don't depend on LM Studio)
         loadStylePresets();
+      }
+    }
+    
+    async function checkEndpointsAsync() {
+      try {
+        const response = await fetch('/api/check-endpoints');
+        const status = await response.json();
+        
+        // Update local status
+        const localStatus = document.getElementById('localStatus');
+        if (localStatus) {
+          localStatus.innerHTML = status.localAvailable 
+            ? '<span style="color: #10b981;">(Online)</span>' 
+            : '<span style="color: #ef4444;">(Offline)</span>';
+        }
+        
+        // Update cloud status
+        const cloudStatus = document.getElementById('cloudStatus');
+        if (cloudStatus) {
+          cloudStatus.innerHTML = status.openRouterAvailable 
+            ? '<span style="color: #10b981;">(Available)</span>' 
+            : '<span style="color: #ef4444;">(No API Key)</span>';
+        }
+        
+        // If we just discovered OpenRouter is available and cloud is selected, load models
+        if (status.openRouterAvailable && document.querySelector('input[name="modelType"]:checked')?.value === 'cloud') {
+          const currentModel = document.getElementById('cloudModel')?.getAttribute('data-current-model');
+          if (document.getElementById('cloudModel')?.innerHTML === '<option value="">Loading models...</option>') {
+            loadOpenRouterModels(currentModel);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to check endpoints:', error);
+        
+        // Update status to show error
+        const localStatus = document.getElementById('localStatus');
+        if (localStatus) {
+          localStatus.innerHTML = '<span style="color: #ef4444;">(Check failed)</span>';
+        }
+        
+        const cloudStatus = document.getElementById('cloudStatus');
+        if (cloudStatus) {
+          cloudStatus.innerHTML = '<span style="color: #ef4444;">(Check failed)</span>';
+        }
       }
     }
     
@@ -2784,6 +2938,285 @@ export class PreviewServer {
         alert('Failed to save settings: ' + error.message);
       }
     }
+    
+    // Model management functions
+    let customModelList = null;
+    let allOpenRouterModels = [];
+    
+    async function showManageModelsModal() {
+      document.getElementById('manageModelsModal').classList.add('show');
+      
+      // Load current custom model list
+      try {
+        const response = await fetch('/api/custom-models');
+        const data = await response.json();
+        customModelList = data.models || null;
+      } catch {
+        customModelList = null;
+      }
+      
+      // Load all available models from OpenRouter
+      const availableModelsList = document.getElementById('availableModelsList');
+      availableModelsList.innerHTML = \`
+        <div style="text-align: center; padding: 2rem;">
+          <div style="animation: spin 1s linear infinite;">🔄</div>
+          <p style="margin-top: 1rem; opacity: 0.7;">Fetching models from OpenRouter...</p>
+        </div>
+      \`;
+      
+      try {
+        const apiKey = await fetch('/api/current-config').then(r => r.json()).then(d => d.openRouterKey);
+        if (!apiKey) {
+          throw new Error('No OpenRouter API key configured');
+        }
+        
+        const response = await fetch('https://openrouter.ai/api/v1/models', {
+          headers: {
+            'Authorization': \`Bearer \${apiKey}\`,
+            'HTTP-Referer': window.location.origin,
+            'X-Title': 'GEMS'
+          }
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch models');
+        }
+        
+        const data = await response.json();
+        allOpenRouterModels = data.data || [];
+        
+        renderModelLists();
+        
+      } catch (error) {
+        availableModelsList.innerHTML = \`
+          <div style="text-align: center; padding: 2rem; color: #ef4444;">
+            <p>❌ Failed to load models</p>
+            <p style="font-size: 0.875rem; opacity: 0.7; margin-top: 0.5rem;">\${error.message}</p>
+          </div>
+        \`;
+      }
+    }
+    
+    function renderModelLists() {
+      const searchTerm = document.getElementById('modelSearch').value.toLowerCase();
+      const availableModelsList = document.getElementById('availableModelsList');
+      const quickModelsList = document.getElementById('quickModelsList');
+      
+      // Get current quick list (either custom or default)
+      const quickList = customModelList || [
+        { id: 'x-ai/grok-4', name: '🌟 Grok-4' },
+        { id: 'anthropic/claude-sonnet-4', name: '🚀 Claude Sonnet 4' },
+        { id: 'openai/gpt-4o', name: '⚡ GPT-4o' },
+        { id: 'openai/o3-mini', name: '✨ o3-mini' },
+        { id: 'google/gemini-2.5-flash', name: '🏃 Gemini 2.5 Flash' },
+        { id: 'google/gemini-2.5-pro', name: '🧠 Gemini 2.5 Pro' },
+        { id: 'anthropic/claude-3.5-sonnet', name: '💬 Claude 3.5 Sonnet' },
+        { id: 'anthropic/claude-3.7-sonnet', name: '🎯 Claude 3.7 Sonnet' },
+        { id: 'meta-llama/llama-3-70b-instruct', name: '🦙 Llama 3 70B' }
+      ];
+      
+      // Filter out models already in quick list
+      const quickListIds = quickList.map(m => m.id);
+      const availableModels = allOpenRouterModels
+        .filter(m => !quickListIds.includes(m.id))
+        .filter(m => searchTerm === '' || m.id.toLowerCase().includes(searchTerm));
+      
+      // Render available models
+      availableModelsList.innerHTML = availableModels.length === 0 
+        ? '<div style="text-align: center; padding: 2rem; opacity: 0.5;">No models found</div>'
+        : availableModels.map(model => \`
+            <div style="padding: 0.75rem; margin-bottom: 0.5rem; background: rgba(255, 255, 255, 0.05); 
+                        border-radius: 6px; cursor: pointer; transition: all 0.3s;
+                        display: flex; justify-content: space-between; align-items: center;"
+                 onmouseover="this.style.background='rgba(255, 255, 255, 0.1)'"
+                 onmouseout="this.style.background='rgba(255, 255, 255, 0.05)'">
+              <div>
+                <div style="font-weight: 500;">\${model.id}</div>
+                <div style="font-size: 0.75rem; opacity: 0.7;">
+                  Context: \${(model.context_length / 1000).toFixed(0)}k
+                  \${model.pricing?.prompt === 0 ? ' • Free' : ''}
+                </div>
+              </div>
+              <button onclick="addToQuickList('\${model.id}')" 
+                style="padding: 0.25rem 0.75rem; background: rgba(103, 126, 234, 0.5); 
+                       border: none; color: white; border-radius: 4px; cursor: pointer;
+                       font-size: 0.75rem;">
+                + Add
+              </button>
+            </div>
+          \`).join('');
+      
+      // Render quick list
+      quickModelsList.innerHTML = quickList.length === 0
+        ? '<div style="text-align: center; padding: 2rem; opacity: 0.5;">No models in quick list</div>'
+        : quickList.map((model, index) => \`
+            <div style="padding: 0.75rem; margin-bottom: 0.5rem; background: rgba(255, 255, 255, 0.05); 
+                        border-radius: 6px; cursor: move; transition: all 0.3s;
+                        display: flex; justify-content: space-between; align-items: center;"
+                 draggable="true" data-index="\${index}">
+              <div>
+                <div style="font-weight: 500;">\${model.name || model.id}</div>
+                <div style="font-size: 0.75rem; opacity: 0.7;">\${model.id}</div>
+              </div>
+              <button onclick="removeFromQuickList(\${index})" 
+                style="padding: 0.25rem 0.5rem; background: rgba(239, 68, 68, 0.5); 
+                       border: none; color: white; border-radius: 4px; cursor: pointer;
+                       font-size: 0.875rem;">
+                ×
+              </button>
+            </div>
+          \`).join('');
+      
+      // Set up drag and drop for reordering
+      setupDragAndDrop();
+    }
+    
+    function addToQuickList(modelId) {
+      const model = allOpenRouterModels.find(m => m.id === modelId);
+      if (!model) return;
+      
+      // Create a nice name for the model
+      let name = modelId;
+      let icon = '🤖';
+      
+      if (modelId.includes('grok')) {
+        icon = '🌟';
+        name = modelId.replace('x-ai/', '').replace(/-/g, ' ');
+      } else if (modelId.includes('claude')) {
+        icon = '🚀';
+        name = modelId.replace('anthropic/', '').replace(/-/g, ' ');
+      } else if (modelId.includes('gpt')) {
+        icon = '⚡';
+        name = modelId.replace('openai/', '').replace(/-/g, ' ');
+      } else if (modelId.includes('gemini')) {
+        icon = '🏃';
+        name = modelId.replace('google/', '').replace(/-/g, ' ');
+      }
+      
+      name = icon + ' ' + name.charAt(0).toUpperCase() + name.slice(1);
+      
+      if (!customModelList) {
+        // Initialize with current defaults
+        customModelList = [
+          { id: 'x-ai/grok-4', name: '🌟 Grok-4' },
+          { id: 'anthropic/claude-sonnet-4', name: '🚀 Claude Sonnet 4' },
+          { id: 'openai/gpt-4o', name: '⚡ GPT-4o' },
+          { id: 'openai/o3-mini', name: '✨ o3-mini' },
+          { id: 'google/gemini-2.5-flash', name: '🏃 Gemini 2.5 Flash' },
+          { id: 'google/gemini-2.5-pro', name: '🧠 Gemini 2.5 Pro' },
+          { id: 'anthropic/claude-3.5-sonnet', name: '💬 Claude 3.5 Sonnet' },
+          { id: 'anthropic/claude-3.7-sonnet', name: '🎯 Claude 3.7 Sonnet' },
+          { id: 'meta-llama/llama-3-70b-instruct', name: '🦙 Llama 3 70B' }
+        ];
+      }
+      
+      customModelList.push({ id: modelId, name });
+      renderModelLists();
+    }
+    
+    function removeFromQuickList(index) {
+      if (!customModelList) {
+        customModelList = [
+          { id: 'x-ai/grok-4', name: '🌟 Grok-4' },
+          { id: 'anthropic/claude-sonnet-4', name: '🚀 Claude Sonnet 4' },
+          { id: 'openai/gpt-4o', name: '⚡ GPT-4o' },
+          { id: 'openai/o3-mini', name: '✨ o3-mini' },
+          { id: 'google/gemini-2.5-flash', name: '🏃 Gemini 2.5 Flash' },
+          { id: 'google/gemini-2.5-pro', name: '🧠 Gemini 2.5 Pro' },
+          { id: 'anthropic/claude-3.5-sonnet', name: '💬 Claude 3.5 Sonnet' },
+          { id: 'anthropic/claude-3.7-sonnet', name: '🎯 Claude 3.7 Sonnet' },
+          { id: 'meta-llama/llama-3-70b-instruct', name: '🦙 Llama 3 70B' }
+        ];
+      }
+      
+      customModelList.splice(index, 1);
+      renderModelLists();
+    }
+    
+    function setupDragAndDrop() {
+      const items = document.querySelectorAll('#quickModelsList > div[draggable="true"]');
+      let draggedElement = null;
+      
+      items.forEach(item => {
+        item.addEventListener('dragstart', (e) => {
+          draggedElement = e.target;
+          e.target.style.opacity = '0.5';
+        });
+        
+        item.addEventListener('dragend', (e) => {
+          e.target.style.opacity = '';
+        });
+        
+        item.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          const afterElement = getDragAfterElement(document.getElementById('quickModelsList'), e.clientY);
+          if (afterElement == null) {
+            document.getElementById('quickModelsList').appendChild(draggedElement);
+          } else {
+            document.getElementById('quickModelsList').insertBefore(draggedElement, afterElement);
+          }
+        });
+      });
+    }
+    
+    function getDragAfterElement(container, y) {
+      const draggableElements = [...container.querySelectorAll('div[draggable="true"]:not(.dragging)')];
+      
+      return draggableElements.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        
+        if (offset < 0 && offset > closest.offset) {
+          return { offset: offset, element: child };
+        } else {
+          return closest;
+        }
+      }, { offset: Number.NEGATIVE_INFINITY }).element;
+    }
+    
+    function cancelManageModels() {
+      document.getElementById('manageModelsModal').classList.remove('show');
+      customModelList = null;
+    }
+    
+    async function saveModelList() {
+      try {
+        // Save the custom model list
+        await fetch('/api/custom-models', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ models: customModelList })
+        });
+        
+        // Update the model dropdown in settings
+        await loadOpenRouterModels(document.getElementById('cloudModel')?.value);
+        
+        // Close modal
+        cancelManageModels();
+        
+        // Show success message
+        const successDiv = document.createElement('div');
+        successDiv.style.cssText = 'position: fixed; top: 2rem; right: 2rem; background: rgba(16, 185, 129, 0.9); color: white; padding: 1rem 1.5rem; border-radius: 8px; z-index: 3000;';
+        successDiv.textContent = '✅ Model list updated successfully!';
+        document.body.appendChild(successDiv);
+        
+        setTimeout(() => {
+          successDiv.remove();
+        }, 3000);
+        
+      } catch (error) {
+        console.error('Failed to save model list:', error);
+        alert('Failed to save model list: ' + error.message);
+      }
+    }
+    
+    // Add search functionality
+    document.addEventListener('DOMContentLoaded', () => {
+      const modelSearch = document.getElementById('modelSearch');
+      if (modelSearch) {
+        modelSearch.addEventListener('input', renderModelLists);
+      }
+    });
     
     // Style preset functions
     async function loadStylePresets() {

@@ -17,6 +17,7 @@ interface Config {
       key?: string;
       model?: string;
     };
+    customModels?: Array<{ id: string; name: string }>;
   };
   output: {
     format: 'webcomponent' | 'react' | 'vue' | 'vanilla';
@@ -40,7 +41,7 @@ export class ConfigManager {
   private config: Config;
   private defaultConfig: Config = {
     ai: {
-      defaultModel: 'local',
+      defaultModel: 'cloud',
       local: {
         endpoint: 'http://10.0.0.237:1234',
         model: 'mistralai/devstral-small-2505',
@@ -123,20 +124,8 @@ export class ConfigManager {
         this.config.ai.openrouter.model = 'anthropic/claude-sonnet-4';
       }
       
-      // If OpenRouter is available and defaultModel is not explicitly set in config file, prefer cloud
-      if (!existsSync(this.configPath)) {
-        this.config.ai.defaultModel = 'cloud';
-      } else {
-        try {
-          const savedConfig = JSON.parse(readFileSync(this.configPath, 'utf-8'));
-          if (!savedConfig.ai?.defaultModel) {
-            this.config.ai.defaultModel = 'cloud';
-          }
-        } catch {
-          // If we can't read the config, default to cloud when OpenRouter is available
-          this.config.ai.defaultModel = 'cloud';
-        }
-      }
+      // Don't override user's explicit model choice
+      // Since we now default to cloud, only override if there's no saved config
     }
     
     if (process.env.LM_STUDIO_ENDPOINT) {

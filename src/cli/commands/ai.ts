@@ -178,16 +178,17 @@ export const aiCommand = new Command('ai')
                 // Include popular models and free models
                 const isPopular = m.id.includes('claude') || m.id.includes('gpt-4') || 
                                  m.id.includes('gemini') || m.id.includes('o3') || 
-                                 m.id.includes('o1') || m.pricing?.prompt === 0;
+                                 m.id.includes('o1') || m.id.includes('grok') || m.pricing?.prompt === 0;
                 return isPopular;
               })
               .sort((a: any, b: any) => {
-                // Sort by: Claude first, then OpenAI, then Google, then free models
+                // Sort by: Grok first, then Claude, then OpenAI, then Google, then free models
                 const getPriority = (id: string) => {
-                  if (id.includes('claude')) return 0;
-                  if (id.includes('gpt-4') || id.includes('o3')) return 1;
-                  if (id.includes('gemini')) return 2;
-                  return 3;
+                  if (id.includes('grok')) return 0;
+                  if (id.includes('claude')) return 1;
+                  if (id.includes('gpt-4') || id.includes('o3')) return 2;
+                  if (id.includes('gemini')) return 3;
+                  return 4;
                 };
                 return getPriority(a.id) - getPriority(b.id);
               })
@@ -210,7 +211,11 @@ export const aiCommand = new Command('ai')
             let title = model.id;
             let icon = '🤖';
             
-            if (model.id.includes('claude')) {
+            if (model.id.includes('grok')) {
+              icon = '🌟';
+              if (model.id === 'x-ai/grok-4') title = 'Grok-4';
+              else if (model.id.includes('grok-')) title = model.id.replace('x-ai/', '').replace(/-/g, ' ');
+            } else if (model.id.includes('claude')) {
               icon = '🚀';
               if (model.id.includes('sonnet-4')) title = 'Claude Sonnet 4';
               else if (model.id.includes('3.5-sonnet')) title = 'Claude 3.5 Sonnet';
@@ -252,6 +257,11 @@ export const aiCommand = new Command('ai')
         } else {
           // Fallback to predefined models if fetch failed
           cloudModels = [
+            {
+              title: '🌟 Grok-4',
+              value: 'x-ai/grok-4',
+              description: 'Latest xAI model with advanced capabilities'
+            },
             {
               title: '🚀 Claude Sonnet 4',
               value: 'anthropic/claude-sonnet-4',
