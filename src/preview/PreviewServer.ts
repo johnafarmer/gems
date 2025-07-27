@@ -369,7 +369,9 @@ export class PreviewServer {
             res.end(JSON.stringify({
               defaultModel: config.get('ai.defaultModel'),
               cloudModel: config.get('ai.openrouter.model'),
-              localEndpoint: config.get('ai.local.endpoint')
+              localEndpoint: config.get('ai.local.endpoint'),
+              claudeCodeModel: config.get('ai.claudeCode.model'),
+              openRouterKey: config.get('ai.openrouter.key')
             }));
           }).catch(() => {
             res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -443,9 +445,15 @@ export class PreviewServer {
               ]);
               
               const { ConfigManager } = await import('../config/ConfigManager.js');
+              const { AIService } = await import('../services/ai/AIService.js');
               const config = new ConfigManager();
+              const aiService = new AIService(config);
+              
               const apiKey = config.get('ai.openrouter.key');
               const openRouterAvailable = !!apiKey;
+              
+              // Check Claude Code availability
+              const claudeCodeAvailable = await aiService.isClaudeCodeAvailable();
               
               // Debug logging
               console.log('OpenRouter API Key check:', {
@@ -459,7 +467,8 @@ export class PreviewServer {
               res.end(JSON.stringify({
                 localAvailable: localAvailable || networkAvailable,
                 networkAvailable,
-                openRouterAvailable
+                openRouterAvailable,
+                claudeCodeAvailable
               }));
             } catch (error) {
               res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -534,7 +543,7 @@ export class PreviewServer {
           req.on('data', chunk => body += chunk);
           req.on('end', async () => {
             try {
-              const { defaultModel, localEndpoint, cloudModel } = JSON.parse(body);
+              const { defaultModel, localEndpoint, cloudModel, claudeCodeModel } = JSON.parse(body);
               
               const { ConfigManager } = await import('../config/ConfigManager.js');
               const config = new ConfigManager();
@@ -550,6 +559,10 @@ export class PreviewServer {
               
               if (cloudModel) {
                 config.set('ai.openrouter.model', cloudModel);
+              }
+              
+              if (claudeCodeModel) {
+                config.set('ai.claudeCode.model', claudeCodeModel);
               }
               
               res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -2373,7 +2386,10 @@ export class PreviewServer {
         const config = await configRes.json();
         const modelInfo = document.getElementById('modelInfo');
         if (modelInfo) {
-          if (config.defaultModel === 'cloud') {
+          if (config.defaultModel === 'claude-code') {
+            const modelName = config.claudeCodeModel === 'opus-4' ? 'Claude Opus 4' : 'Claude Sonnet 4';
+            modelInfo.textContent = 'Using: ' + modelName;
+          } else if (config.defaultModel === 'cloud') {
             modelInfo.textContent = 'Using: ' + (config.cloudModel || 'OpenRouter');
           } else {
             modelInfo.textContent = 'Using: Local LM Studio';
@@ -2488,7 +2504,10 @@ export class PreviewServer {
         const config = await configRes.json();
         const modelInfo = document.getElementById('modelInfo');
         if (modelInfo) {
-          if (config.defaultModel === 'cloud') {
+          if (config.defaultModel === 'claude-code') {
+            const modelName = config.claudeCodeModel === 'opus-4' ? 'Claude Opus 4' : 'Claude Sonnet 4';
+            modelInfo.textContent = 'Using: ' + modelName;
+          } else if (config.defaultModel === 'cloud') {
             modelInfo.textContent = 'Using: ' + (config.cloudModel || 'OpenRouter');
           } else {
             modelInfo.textContent = 'Using: Local LM Studio';
@@ -2605,7 +2624,11 @@ export class PreviewServer {
               
               <div style="margin-bottom: 1.5rem;">
                 <label style="display: block; margin-bottom: 0.5rem; font-size: 0.875rem; opacity: 0.8;">Model Type:</label>
-                <div style="display: flex; gap: 1rem;">
+                <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                  <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                    <input type="radio" name="modelType" value="claude-code" \${config.defaultModel === 'claude-code' ? 'checked' : ''}>
+                    <span>🤖 Claude Code <span id="claudeCodeStatus" style="color: #fbbf24;">(Checking...)</span></span>
+                  </label>
                   <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
                     <input type="radio" name="modelType" value="local" \${config.defaultModel === 'local' ? 'checked' : ''}>
                     <span>🖥️ Local/Network LM Studio <span id="localStatus" style="color: #fbbf24;">(Checking...)</span></span>
@@ -2639,6 +2662,21 @@ export class PreviewServer {
                          font-size: 0.875rem;">
                   ⚙️ Manage Model List
                 </button>
+              </div>
+              
+              <div id="claudeCodeSettings" style="\${config.defaultModel === 'claude-code' ? '' : 'display: none;'}">
+                <label style="display: block; margin-bottom: 0.5rem; font-size: 0.875rem; opacity: 0.8;">Claude Model:</label>
+                <select id="claudeCodeModel" 
+                  style="width: 100%; padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); 
+                         background: rgba(255, 255, 255, 0.1); color: white; font-family: inherit; margin-bottom: 1rem;">
+                  <option value="sonnet-4" \${config.claudeCodeModel === 'sonnet-4' ? 'selected' : ''}>🚀 Claude Sonnet 4 - Fast and capable</option>
+                  <option value="opus-4" \${config.claudeCodeModel === 'opus-4' ? 'selected' : ''}>🧠 Claude Opus 4 - Most powerful</option>
+                </select>
+                
+                <div style="padding: 0.75rem; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); 
+                            border-radius: 8px; font-size: 0.875rem; color: #93bbfc;">
+                  💡 <strong>No API costs!</strong> Uses your existing Claude subscription through Claude Code CLI.
+                </div>
               </div>
             </div>
             
@@ -2762,6 +2800,7 @@ export class PreviewServer {
           radio.addEventListener('change', (e) => {
             document.getElementById('localSettings').style.display = e.target.value === 'local' ? 'block' : 'none';
             document.getElementById('cloudSettings').style.display = e.target.value === 'cloud' ? 'block' : 'none';
+            document.getElementById('claudeCodeSettings').style.display = e.target.value === 'claude-code' ? 'block' : 'none';
           });
         });
         
@@ -2809,6 +2848,14 @@ export class PreviewServer {
       try {
         const response = await fetch('/api/check-endpoints');
         const status = await response.json();
+        
+        // Update Claude Code status
+        const claudeCodeStatus = document.getElementById('claudeCodeStatus');
+        if (claudeCodeStatus) {
+          claudeCodeStatus.innerHTML = status.claudeCodeAvailable 
+            ? '<span style="color: #10b981;">(Available)</span>' 
+            : '<span style="color: #ef4444;">(Not Available)</span>';
+        }
         
         // Update local status
         const localStatus = document.getElementById('localStatus');
@@ -2891,6 +2938,7 @@ export class PreviewServer {
       const modelType = document.querySelector('input[name="modelType"]:checked')?.value;
       const localEndpoint = document.getElementById('localEndpoint')?.value;
       const cloudModel = document.getElementById('cloudModel')?.value;
+      const claudeCodeModel = document.getElementById('claudeCodeModel')?.value;
       const stylesEnabled = document.getElementById('stylesEnabled')?.checked;
       const activeStyle = document.querySelector('input[name="activeStyle"]:checked')?.value;
       
@@ -2902,7 +2950,8 @@ export class PreviewServer {
           body: JSON.stringify({
             defaultModel: modelType,
             localEndpoint,
-            cloudModel
+            cloudModel,
+            claudeCodeModel
           })
         });
         

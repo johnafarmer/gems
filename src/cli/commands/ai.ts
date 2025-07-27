@@ -39,10 +39,19 @@ export const aiCommand = new Command('ai')
       const localEndpoint = config.get('ai.local.endpoint');
       const openRouterKey = config.get('ai.openrouter.key');
       const openRouterModel = config.get('ai.openrouter.model');
+      const claudeCodeModel = config.get('ai.claudeCode.model');
       
-      console.log(chalk.white('Default Model: ') + chalk.yellow(currentModel === 'local' ? '🖥️  Local/Network' : '☁️  Cloud'));
+      let modelDisplay = '☁️  Cloud';
+      if (currentModel === 'claude-code') modelDisplay = '🤖 Claude Code';
+      else if (currentModel === 'local') modelDisplay = '🖥️  Local/Network';
       
-      if (currentModel === 'local') {
+      console.log(chalk.white('Default Model: ') + chalk.yellow(modelDisplay));
+      
+      if (currentModel === 'claude-code') {
+        console.log(chalk.white('Claude Model: ') + chalk.dim(claudeCodeModel === 'opus-4' ? 'Opus 4' : 'Sonnet 4'));
+        const isAvailable = await aiService.isClaudeCodeAvailable();
+        console.log(chalk.white('Status: ') + (isAvailable ? chalk.green('✅ Available') : chalk.red('❌ Not installed')));
+      } else if (currentModel === 'local') {
         console.log(chalk.white('Endpoint: ') + chalk.dim(localEndpoint));
       } else {
         console.log(chalk.white('OpenRouter API Key: ') + chalk.dim(openRouterKey ? '✅ Configured' : '❌ Not set'));
@@ -77,6 +86,9 @@ export const aiCommand = new Command('ai')
       
       const checkingSpinner = ora('Checking AI endpoints...').start();
       
+      // Check Claude Code availability
+      const claudeCodeAvailable = await aiService.isClaudeCodeAvailable();
+      
       // Check local LM Studio
       const localAvailable = await checkLocalEndpoint('http://localhost:1234');
       
@@ -91,6 +103,22 @@ export const aiCommand = new Command('ai')
       checkingSpinner.stop();
       
       const choices = [];
+      
+      // Add Claude Code option first (highest priority)
+      if (claudeCodeAvailable) {
+        choices.push({
+          title: `${chalk.blueBright('🤖 Claude Code')} ${chalk.green('● Available')}`,
+          description: 'Claude Sonnet 4 & Opus 4 - No API costs',
+          value: { type: 'claude-code', endpoint: 'local-cli' }
+        });
+      } else {
+        choices.push({
+          title: `${chalk.gray('🤖 Claude Code')} ${chalk.red('● Not Available')}`,
+          description: 'Install from claude.ai/code',
+          value: null,
+          disabled: true
+        });
+      }
       
       if (localAvailable) {
         choices.push({
@@ -153,8 +181,39 @@ export const aiCommand = new Command('ai')
         return;
       }
       
+      // If Claude Code selected, show model options
+      if (selection.model.type === 'claude-code') {
+        console.log(chalk.cyan('\n🤖 Select Claude Model\n'));
+        
+        const claudeModelChoices = [
+          {
+            title: '🚀 Claude Sonnet 4',
+            value: 'sonnet-4',
+            description: 'Fast and capable for most components'
+          },
+          {
+            title: '🧠 Claude Opus 4',
+            value: 'opus-4',
+            description: 'Most powerful for complex components'
+          }
+        ];
+        
+        const claudeModel = await prompts({
+          type: 'select',
+          name: 'model',
+          message: 'Select Claude model',
+          choices: claudeModelChoices
+        });
+        
+        if (claudeModel.model) {
+          config.set('ai.defaultModel', 'claude-code');
+          config.set('ai.claudeCode.model', claudeModel.model);
+          const modelName = claudeModelChoices.find(m => m.value === claudeModel.model)?.title || claudeModel.model;
+          console.log(chalk.green(`\n✅ Set to use ${modelName} via Claude Code`));
+        }
+      }
       // If cloud selected, show model options
-      if (selection.model.type === 'cloud') {
+      else if (selection.model.type === 'cloud') {
         console.log(chalk.cyan('\n☁️  Select OpenRouter Model\n'));
         
         // Try to fetch user's available models
@@ -403,7 +462,9 @@ export const aiCommand = new Command('ai')
         console.log(chalk.dim(result.content.substring(0, 100) + '...'));
         
         console.log(chalk.cyan('\n📍 Source:'));
-        if (result.source.type === 'local') {
+        if (result.source.type === 'claude-code') {
+          console.log(`   Claude Code: ${result.source.model}`);
+        } else if (result.source.type === 'local') {
           console.log('   Local LM Studio');
         } else if (result.source.type === 'network') {
           console.log(`   Network: ${result.source.endpoint}`);
@@ -416,7 +477,11 @@ export const aiCommand = new Command('ai')
         
         console.log(chalk.yellow('\n💡 Troubleshooting tips:'));
         const currentModel = config.get('ai.defaultModel');
-        if (currentModel === 'local') {
+        if (currentModel === 'claude-code') {
+          console.log('- Make sure Claude Code is installed from claude.ai/code');
+          console.log('- Run "claude login" to authenticate');
+          console.log('- Check that "claude --version" works in terminal');
+        } else if (currentModel === 'local') {
           console.log('- Make sure LM Studio is running');
           console.log('- Check that a model is loaded in LM Studio');
           console.log('- Verify the server is started (green button)');

@@ -48,7 +48,7 @@ export class ConfigManager {
       defaultModel: 'claude-code',
       claudeCode: {
         model: 'sonnet-4',
-        timeout: 60000
+        timeout: 300000  // 5 minutes default
       },
       local: {
         endpoint: 'http://10.0.0.237:1234',

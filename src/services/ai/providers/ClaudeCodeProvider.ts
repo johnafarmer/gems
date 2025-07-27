@@ -12,8 +12,12 @@ export class ClaudeCodeProvider {
     const prompt = this.buildClaudePrompt(options);
     
     try {
+      console.log('🤖 Calling Claude Code with model:', options.model);
       const output = await this.executeClaudeCode(prompt, options.model);
+      console.log('✅ Claude Code response received, length:', output.length);
+      
       const componentCode = this.parseClaudeOutput(output);
+      console.log('🎯 Parsed component code, length:', componentCode.length);
       
       return {
         content: componentCode,
@@ -24,78 +28,138 @@ export class ClaudeCodeProvider {
         }
       };
     } catch (error) {
+      console.error('❌ Claude Code error:', error);
       throw new Error(`Claude Code generation failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   private buildClaudePrompt(options: Omit<GenerateOptions, 'model'>): string {
-    // Add specific instructions for Claude Code to ensure clean output
-    return `${options.prompt}
+    // Give Claude Code the full GEMS context
+    return `You are helping generate web components for GEMS (Generative Element Management System).
 
-CRITICAL: Your response must follow these exact rules:
-1. Output ONLY the JavaScript code for the web component
-2. Do NOT include ANY explanations, descriptions, or commentary
-3. Start your response with exactly: \`\`\`javascript
-4. End your response with exactly: \`\`\`
-5. The code must be a complete, working web component
-6. Include customElements.define() at the end
-7. No text before the opening code block
-8. No text after the closing code block`;
+CONTEXT: GEMS is a tool for creating web components for WordPress sites. Components should:
+- Use Shadow DOM for encapsulation
+- Be self-contained with all styles included
+- Be accessible and responsive
+- Work well in WordPress environments
+
+USER REQUEST: ${options.prompt}
+
+RESPONSE FORMAT: You must output ONLY a code block containing the complete web component JavaScript code.
+
+Example structure:
+\`\`\`javascript
+class ComponentName extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+  }
+  
+  connectedCallback() {
+    this.render();
+  }
+  
+  render() {
+    this.shadowRoot.innerHTML = \`
+      <style>
+        /* All styles here */
+      </style>
+      <div class="container">
+        <!-- HTML structure -->
+      </div>
+    \`;
+  }
+}
+
+customElements.define('component-name', ComponentName);
+\`\`\`
+
+Remember: Output ONLY the code block, no explanations.`;
   }
 
   private async executeClaudeCode(prompt: string, model: 'sonnet-4' | 'opus-4'): Promise<string> {
     return new Promise((resolve, reject) => {
-      const modelFlag = model === 'opus-4' ? '--model opus-4' : ''; // Sonnet is default
-      const args = ['-p', prompt, '--dangerously-skip-permissions'];
+      const args = ['--dangerously-skip-permissions', '--print'];
       
-      if (modelFlag) {
-        args.push('--model', 'opus-4');
+      if (model === 'opus-4') {
+        args.push('--model', 'opus');
+      } else if (model === 'sonnet-4') {
+        args.push('--model', 'sonnet');
       }
 
+      console.log('📝 Executing Claude Code command...');
+      console.log('Model:', model);
+      console.log('Working directory:', process.cwd());
+      
       const claude = spawn('claude', args, {
-        shell: true,
-        timeout: this.timeout
+        shell: false, // Don't use shell to avoid escaping issues
+        cwd: process.cwd() // Ensure we're in the GEMS directory
       });
+
+      // Write the prompt to stdin
+      claude.stdin.write(prompt);
+      claude.stdin.end();
 
       let output = '';
       let error = '';
+      let completed = false;
+
+      // Set up timeout
+      const timeoutId = setTimeout(() => {
+        if (!completed) {
+          completed = true;
+          claude.kill();
+          reject(new Error(`Claude Code execution timed out after ${this.timeout}ms`));
+        }
+      }, this.timeout);
 
       claude.stdout.on('data', (data) => {
-        output += data.toString();
+        const chunk = data.toString();
+        output += chunk;
+        console.log('📤 Claude output chunk:', chunk.substring(0, 100) + (chunk.length > 100 ? '...' : ''));
       });
 
       claude.stderr.on('data', (data) => {
-        error += data.toString();
+        const chunk = data.toString();
+        error += chunk;
+        console.log('⚠️ Claude error chunk:', chunk);
       });
 
       claude.on('error', (err) => {
-        if (err.message.includes('ENOENT')) {
-          reject(new Error('Claude Code CLI not found. Please ensure Claude Code is installed and available in your PATH.'));
-        } else {
-          reject(err);
-        }
-      });
-
-      claude.on('close', (code) => {
-        if (code === 0) {
-          resolve(output);
-        } else {
-          // Check for common error patterns
-          if (error.includes('authentication') || error.includes('unauthorized')) {
-            reject(new Error('Claude Code authentication failed. Please ensure you are logged in to Claude Code.'));
-          } else if (error.includes('rate limit')) {
-            reject(new Error('Claude Code rate limit exceeded. Please try again later.'));
+        if (!completed) {
+          completed = true;
+          clearTimeout(timeoutId);
+          if (err.message.includes('ENOENT')) {
+            reject(new Error('Claude Code CLI not found. Please ensure Claude Code is installed and available in your PATH.'));
           } else {
-            reject(new Error(`Claude Code exited with code ${code}: ${error || output}`));
+            reject(err);
           }
         }
       });
 
-      // Handle timeout
-      setTimeout(() => {
-        claude.kill();
-        reject(new Error(`Claude Code execution timed out after ${this.timeout}ms`));
-      }, this.timeout);
+      claude.on('close', (code) => {
+        if (!completed) {
+          completed = true;
+          clearTimeout(timeoutId);
+          if (code === 0) {
+            console.log('✅ Claude Code completed successfully');
+            resolve(output);
+          } else {
+            console.error('❌ Claude Code failed with exit code:', code);
+            console.error('Error output:', error);
+            console.error('Standard output:', output);
+            
+            // Check for common error patterns
+            if (error.includes('authentication') || error.includes('unauthorized')) {
+              reject(new Error('Claude Code authentication failed. Please ensure you are logged in to Claude Code.'));
+            } else if (error.includes('rate limit')) {
+              reject(new Error('Claude Code rate limit exceeded. Please try again later.'));
+            } else {
+              reject(new Error(`Claude Code exited with code ${code}: ${error || output}`));
+            }
+          }
+        }
+      });
     });
   }
 
@@ -130,22 +194,44 @@ CRITICAL: Your response must follow these exact rules:
 
   async isAvailable(): Promise<boolean> {
     try {
+      console.log('🔍 Checking Claude Code availability...');
       const claude = spawn('claude', ['--version'], {
-        shell: true,
-        timeout: 5000
+        shell: true
       });
 
       return new Promise((resolve) => {
-        claude.on('error', () => resolve(false));
-        claude.on('close', (code) => resolve(code === 0));
+        let resolved = false;
         
-        // Timeout fallback
-        setTimeout(() => {
-          claude.kill();
+        const cleanup = () => {
+          if (!resolved) {
+            resolved = true;
+            claude.kill();
+          }
+        };
+
+        const timeoutId = setTimeout(() => {
+          console.log('⏱️ Claude Code availability check timed out');
+          cleanup();
           resolve(false);
-        }, 5000);
+        }, 3000);
+
+        claude.on('error', (err) => {
+          console.log('❌ Claude Code not found:', err.message);
+          clearTimeout(timeoutId);
+          cleanup();
+          resolve(false);
+        });
+        
+        claude.on('close', (code) => {
+          clearTimeout(timeoutId);
+          cleanup();
+          const available = code === 0;
+          console.log(available ? '✅ Claude Code is available' : '❌ Claude Code check failed with code:', code);
+          resolve(available);
+        });
       });
-    } catch {
+    } catch (err) {
+      console.error('❌ Error checking Claude Code:', err);
       return false;
     }
   }
